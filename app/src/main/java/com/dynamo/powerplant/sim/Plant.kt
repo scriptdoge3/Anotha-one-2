@@ -19,7 +19,7 @@ enum class Failure(val headline: String, val detail: String) {
     OUT_OF_PHASE("SHAFT WRECKED CLOSING OUT OF PHASE", "You closed the breaker with the machines fighting each other. The coupling sheared and took the crankshaft with it."),
     POLE_SLIP("MACHINE FELL OUT OF STEP", "Field too weak for the load being carried. The rotor slipped a pole and the whole station shook."),
     BLACKOUT("THE TOWN WENT DARK", "Frequency collapsed on the bus. Every lamp in the county is out and the mill has stopped."),
-    BATTERY_DEAD("NOTHING LEFT IN THE CELLS", "The battery is flat, the magneto will not fire at rest, and there is no way to turn the engine over."),
+    BATTERY_DEAD("NOTHING LEFT IN THE CELLS", "The battery is flat, the exciter will not fire at rest, and there is no way to turn the engine over."),
     SHIFT_COMPLETE("SHIFT COMPLETE", "Seven and a half hours on the boards. The day man is here to take over.")
 }
 
@@ -206,6 +206,10 @@ class Plant(seed: Long = System.nanoTime()) {
     private fun integrate(dt: Double) {
         val omega = rpm * PI / 30.0
 
+        // Tell the engine what the station service is worth this instant, so the
+        // GRID position of the selector rises and falls with the town bus.
+        engine.busSupplyPu = grid.busVolts / Spec.RATED_VOLTS
+
         // ---- prime movers -------------------------------------------------------
         var torque = engine.step(dt, ctl, rpm)
         if (engine.firedThisStep) events.fired = true
@@ -290,6 +294,19 @@ class Plant(seed: Long = System.nanoTime()) {
         for (f in grid.feeders) s -= f.damageSeconds * 0.5
         if (failure != Failure.SHIFT_COMPLETE && failure != Failure.NONE) s -= 40.0
         return clamp(s, 0.0, 100.0).toInt()
+    }
+
+    /**
+     * How brightly the panel lamps burn, which depends on whether the source the
+     * selector is pointing at is actually alive.
+     */
+    fun panelLampLevel(): Double = when (ctl.ignition) {
+        IgnitionMode.GRID ->
+            ctl.ignition.panelLamps * clamp((grid.busVolts / Spec.RATED_VOLTS - 0.40) / 0.40, 0.0, 1.0)
+        IgnitionMode.GEN ->
+            ctl.ignition.panelLamps * clamp(gen.emf(rpm) / Spec.RATED_VOLTS, 0.0, 1.0)
+        IgnitionMode.EMG -> ctl.ignition.panelLamps * engine.batteryCharge
+        IgnitionMode.OFF -> 0.0
     }
 
     /** Plant clock: the shift starts at six in the evening. */

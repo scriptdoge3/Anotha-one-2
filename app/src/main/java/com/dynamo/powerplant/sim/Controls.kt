@@ -1,43 +1,42 @@
 package com.dynamo.powerplant.sim
 
 /**
- * The combination key switch, wired exactly as the one on a Model T: a single
- * rotary with five positions in this physical order.
+ * The station service selector: one rotary carrying four positions in this
+ * physical order.
  *
- *     BAT - DIM - OFF - ON - MAG
+ *     GRID - GEN - OFF - EMG
  *
- * BAT and MAG are the two ignition sources. DIM and ON are lighting positions
- * that feed the panel lamps off the battery and give no spark at all. OFF is
- * dead.
+ * It decides where the ignition and the panel lamps are fed from, and each
+ * source behaves differently:
  *
- * The consequence of that layout is the whole point: you start on BAT, and to
- * get across to MAG you must sweep the key through DIM, OFF and ON, three
- * positions with no ignition. Dawdle and the engine stumbles or dies.
+ *  GRID  station service tapped off the town bus. Full and steady at any speed,
+ *        but it dies with the bus, so a collapse takes your ignition with it.
+ *  GEN   the machine's own shaft-driven exciter. Nothing at rest, strengthening
+ *        with speed. Self sufficient, and where you want to be once running.
+ *  OFF   dead.
+ *  EMG   the emergency battery. A fat spark at cranking speed that fades as the
+ *        revolutions rise, and it is the only position that will turn the
+ *        starting motor. It also flattens the cells.
  *
- * The battery gives a fat spark at cranking speed but the trembler coil runs
- * out of dwell as revolutions rise. The magneto gives nothing at rest and
- * strengthens with speed. That is why the engine starts on one and runs on the
- * other.
+ * The layout is the point: EMG is where you start and GEN is where you run, and
+ * getting between them means passing through OFF with no ignition at all.
  */
 enum class IgnitionMode(
     val label: String,
     /** Does this position feed the plugs? */
     val ignites: Boolean,
-    /** Panel lamp brightness drawn from the battery, 0..1. */
-    val panelLamps: Double,
-    /** Battery current drawn by the lamps, per second of charge. */
-    val lampDrain: Double
+    /** How brightly this source lights the panel lamps, 0..1. */
+    val panelLamps: Double
 ) {
-    BAT("BAT", true, 0.0, 0.0),
-    DIM("DIM", false, 0.38, 0.0035),
-    OFF("OFF", false, 0.0, 0.0),
-    ON("ON", false, 1.0, 0.0092),
-    MAG("MAG", true, 0.0, 0.0);
+    GRID("GRID", true, 0.85),
+    GEN("GEN", true, 1.00),
+    OFF("OFF", false, 0.0),
+    EMG("EMG", true, 0.45);
 
-    /** One notch clockwise, towards MAG. Cannot jump positions. */
+    /** One notch clockwise, towards EMG. Cannot jump positions. */
     fun clockwise() = entries[(ordinal + 1).coerceAtMost(entries.size - 1)]
 
-    /** One notch anticlockwise, towards BAT. */
+    /** One notch anticlockwise, towards GRID. */
     fun anticlockwise() = entries[(ordinal - 1).coerceAtLeast(0)]
 }
 

@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.dynamo.powerplant.game.GameView
 import com.dynamo.powerplant.sim.IgnitionMode
 import com.dynamo.powerplant.ui.Layout
+import com.dynamo.powerplant.ui.Tab
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -53,6 +54,14 @@ class ControlsTouchTest {
         val e = MotionEvent.obtain(t, t, action, sx(x), sy(y), 0)
         view.onTouchEvent(e)
         e.recycle()
+    }
+
+    /** Switch decks the way the player does, by hitting the tab bar. */
+    private fun showTab(t: Tab) {
+        val r = L.tabRect(t.ordinal)
+        send(MotionEvent.ACTION_DOWN, r.centerX(), r.centerY())
+        send(MotionEvent.ACTION_UP, r.centerX(), r.centerY())
+        assertEquals("should be showing $t", t, view.tab)
     }
 
     private fun tap(x: Float, y: Float) {
@@ -115,13 +124,13 @@ class ControlsTouchTest {
         val p = view.plant
         p.ctl.ignition = IgnitionMode.OFF
 
-        // The key is a rotary: drag round it from the OFF mark towards MAG.
+        // The selector is a rotary: drag round it from the OFF mark towards GRID.
         val r = L.keySwitchR * 1.12f
         send(MotionEvent.ACTION_DOWN, L.keySwitch.x, L.keySwitch.y - r)
         var seen = mutableListOf(p.ctl.ignition)
-        for (i in 0..20) {
-            // sweep clockwise across the top of the escutcheon towards MAG
-            val deg = -90.0 + i * 5.0
+        for (i in 0..24) {
+            // sweep anticlockwise across the top of the escutcheon towards GRID
+            val deg = -90.0 - i * 5.0
             val a = Math.toRadians(deg)
             send(
                 MotionEvent.ACTION_MOVE,
@@ -131,12 +140,12 @@ class ControlsTouchTest {
             Thread.sleep(60)     // the switch will not be flicked faster than this
             if (seen.last() != p.ctl.ignition) seen.add(p.ctl.ignition)
         }
-        send(MotionEvent.ACTION_UP, L.keySwitch.x + r, L.keySwitch.y)
+        send(MotionEvent.ACTION_UP, L.keySwitch.x - r, L.keySwitch.y)
 
-        assertEquals("should have reached the magneto", IgnitionMode.MAG, p.ctl.ignition)
+        assertEquals("should have reached station service", IgnitionMode.GRID, p.ctl.ignition)
         assertEquals(
-            "the key must pass through every position in order, saw $seen",
-            listOf(IgnitionMode.OFF, IgnitionMode.ON, IgnitionMode.MAG), seen
+            "the selector must pass through every position in order, saw $seen",
+            listOf(IgnitionMode.OFF, IgnitionMode.GEN, IgnitionMode.GRID), seen
         )
     }
 
@@ -164,6 +173,7 @@ class ControlsTouchTest {
     @Test
     fun switchgearRespondsToTaps() {
         val p = view.plant
+        showTab(Tab.ELECTRICAL)
 
         val fieldBefore = p.ctl.fieldSwitchClosed
         tap(L.fieldSwitch.centerX(), L.fieldSwitch.centerY())
@@ -175,14 +185,33 @@ class ControlsTouchTest {
             assertNotEquals("feeder $i must throw", before, p.ctl.feederClosed[i])
         }
 
+        showTab(Tab.CONTROL)
         val reliefBefore = p.ctl.compressionRelease
         tap(L.compRelease.centerX(), L.compRelease.centerY())
         assertNotEquals("the relief cock must move", reliefBefore, p.ctl.compressionRelease)
     }
 
     @Test
+    fun eachDeckOnlyAnswersWhileItIsShowing() {
+        val p = view.plant
+        // On the control deck the breaker is not on the board at all.
+        assertEquals(Tab.CONTROL, view.tab)
+        val breakerBefore = p.ctl.mainBreakerClosed
+        tap(L.mainBreaker.centerX(), L.mainBreaker.centerY())
+        assertEquals("the switchboard must be out of reach", breakerBefore, p.ctl.mainBreakerClosed)
+
+        // And on the electrical deck the throttle is not either.
+        showTab(Tab.ELECTRICAL)
+        p.ctl.throttle = 0.0
+        val cx = L.throttleLever.centerX()
+        drag(cx, L.throttleLever.bottom - 10f, cx, L.throttleLever.top + 10f)
+        assertEquals("the engine controls must be out of reach", 0.0, p.ctl.throttle, 1e-9)
+    }
+
+    @Test
     fun throwingTheBreakerOnADeadMachineWrecksIt() {
         val p = view.plant
+        showTab(Tab.ELECTRICAL)
         assertTrue(!p.ended)
         // Paralleling a stopped machine to a live 2300 volt bus is a short circuit
         // in all but name, and the board does not stop you doing it.
@@ -217,10 +246,14 @@ class ControlsTouchTest {
         val heldThrottle = p.ctl.throttle
         assertTrue("throttle should be open, was $heldThrottle", heldThrottle > 0.2)
 
-        // finger two throws the breaker without disturbing the first
-        val breakerBefore = p.ctl.mainBreakerClosed
-        tap(L.mainBreaker.centerX(), L.mainBreaker.centerY())
-        assertNotEquals(breakerBefore, p.ctl.mainBreakerClosed)
+        // finger two works the spark lever without disturbing the first
+        val sparkBefore = p.ctl.sparkLever
+        val sx2 = L.sparkLever.centerX()
+        val t2 = SystemClock.uptimeMillis()
+        val d2 = MotionEvent.obtain(t2, t2, MotionEvent.ACTION_DOWN, sx(sx2), sy(L.sparkLever.bottom - 10f), 0)
+        view.onTouchEvent(d2); d2.recycle()
+        send(MotionEvent.ACTION_MOVE, sx2, L.sparkLever.top + 10f)
+        assertTrue("the spark lever must have moved", p.ctl.sparkLever > sparkBefore + 0.3)
         assertEquals("the throttle must not have moved", heldThrottle, p.ctl.throttle, 1e-9)
     }
 
@@ -228,14 +261,14 @@ class ControlsTouchTest {
     fun aTouchAfterTheShiftEndsStartsAFreshOne() {
         val p = view.plant
         // wreck it: full throttle off the bus until the flywheel lets go
-        p.ctl.ignition = IgnitionMode.BAT
+        p.ctl.ignition = IgnitionMode.EMG
         p.ctl.throttle = 1.0
         p.engine.starterEngaged = true
         var guard = 0
         while (!p.ended && guard++ < 200000) p.step(1.0 / 60.0)
         assertTrue("expected the shift to end", p.ended)
 
-        tap(L.mainBreaker.centerX(), L.mainBreaker.centerY())
+        tap(L.throttleLever.centerX(), L.throttleLever.centerY())
         assertTrue("the board should be reset for another shift", !p.ended)
         assertEquals(IgnitionMode.OFF, p.ctl.ignition)
         assertEquals(0.0, p.rpm, 1e-9)

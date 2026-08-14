@@ -39,11 +39,11 @@ class Dial(
 
     /** Everything that never moves: face, bands, ticks, numerals, lettering. */
     fun drawFace(c: Canvas, ambient: Float) {
-        Theme.brassBezel(c, cx, cy, r * 1.10f, ambient)
+        Theme.bezel(c, cx, cy, r * 1.10f, ambient)
         Theme.dialFace(c, cx, cy, r, ambient)
 
-        val ink = Theme.dim(Theme.INK, ambient)
-        val inkSoft = Theme.dim(Theme.INK_SOFT, ambient)
+        val ink = Theme.dim(Theme.MARK, ambient)
+        val inkSoft = Theme.dim(Theme.MARK_SOFT, ambient)
 
         // coloured bands just inside the rim
         for (b in bands) {
@@ -117,8 +117,8 @@ class Dial(
         c.restore()
 
         c.drawPath(path, Theme.solid(Theme.dim(color, ambient)))
-        c.drawCircle(cx, cy, r * 0.10f, Theme.solid(Theme.dim(Theme.BRASS_DARK, ambient)))
-        c.drawCircle(cx, cy, r * 0.065f, Theme.solid(Theme.dim(Theme.BRASS, ambient)))
+        c.drawCircle(cx, cy, r * 0.10f, Theme.solid(Theme.dim(Theme.NICKEL_DARK, ambient)))
+        c.drawCircle(cx, cy, r * 0.065f, Theme.solid(Theme.dim(Theme.NICKEL, ambient)))
     }
 
     fun contains(x: Float, y: Float): Boolean {
@@ -137,10 +137,10 @@ object Instruments {
      * breaker as it creeps up to the mark at twelve o'clock.
      */
     fun drawSynchroscopeFace(c: Canvas, cx: Float, cy: Float, r: Float, ambient: Float) {
-        Theme.brassBezel(c, cx, cy, r * 1.10f, ambient)
+        Theme.bezel(c, cx, cy, r * 1.10f, ambient)
         Theme.dialFace(c, cx, cy, r, ambient)
-        val ink = Theme.dim(Theme.INK, ambient)
-        val soft = Theme.dim(Theme.INK_SOFT, ambient)
+        val ink = Theme.dim(Theme.MARK, ambient)
+        val soft = Theme.dim(Theme.MARK_SOFT, ambient)
 
         // full circle of ticks
         for (i in 0 until 36) {
@@ -200,8 +200,8 @@ object Instruments {
         c.drawPath(p, Theme.solid(0x33000000))
         c.restore()
         c.drawPath(p, Theme.solid(Theme.dim(Theme.NEEDLE, ambient)))
-        c.drawCircle(cx, cy, r * 0.095f, Theme.solid(Theme.dim(Theme.BRASS_DARK, ambient)))
-        c.drawCircle(cx, cy, r * 0.060f, Theme.solid(Theme.dim(Theme.BRASS, ambient)))
+        c.drawCircle(cx, cy, r * 0.095f, Theme.solid(Theme.dim(Theme.NICKEL_DARK, ambient)))
+        c.drawCircle(cx, cy, r * 0.060f, Theme.solid(Theme.dim(Theme.NICKEL, ambient)))
     }
 
     /**
@@ -209,7 +209,7 @@ object Instruments {
      * which is how one instrument served both purposes on a small board.
      */
     fun drawInnerScale(c: Canvas, d: Dial, ambient: Float, label: String, factor: Double) {
-        val ink = Theme.dim(Theme.INK_SOFT, ambient)
+        val ink = Theme.dim(Theme.MARK_SOFT, ambient)
         for (i in 0..d.majors) {
             val t = i.toFloat() / d.majors
             val a = Math.toRadians((d.angleFor(d.min + (d.max - d.min) * t)).toDouble())

@@ -32,9 +32,14 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     var knockDamage: Double = 0.0       // 0..1 cumulative, 1 = holed piston
     var bearingWear: Double = 0.0       // 0..1 cumulative, 1 = thrown rod
 
+    /** Volts on the town bus, per unit, for the GRID position of the selector. */
+    var busSupplyPu: Double = 1.0
+
     // --- starter ---
     var starterEngaged: Boolean = false
     var starterCranking: Boolean = false
+    /** True while the cells are being put back, for the mimic diagram. */
+    var batteryChargingNow: Boolean = false
     var starterHeat: Double = 0.0
 
     // --- observable one-shot events, consumed by audio/visuals ---
@@ -51,24 +56,36 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
 
     val ambientC = 8.0
 
-    /** Spark energy 0..1 available at the plug for the given key position and speed. */
+    /** Spark energy 0..1 available at the plug for the selector position and speed. */
     fun sparkEnergy(ctl: Controls, rpm: Double): Double {
         val raw = when (ctl.ignition) {
-            IgnitionMode.MAG -> magnetoOutput(rpm)
-            IgnitionMode.BAT -> batteryOutput(rpm)
-            else -> 0.0     // DIM, OFF and ON are lighting positions, no spark
+            IgnitionMode.GRID -> gridSupply()
+            IgnitionMode.GEN -> generatorSupply(rpm)
+            IgnitionMode.EMG -> emergencySupply(rpm)
+            IgnitionMode.OFF -> 0.0
         }
         return clamp(raw * (1.0 - 0.85 * plugFouling), 0.0, 1.0)
     }
 
-    /** The flywheel magneto: dead at rest, strengthening with speed. */
-    fun magnetoOutput(rpm: Double): Double {
+    /**
+     * Station service off the town bus. Full and steady whatever the engine is
+     * doing, so long as the bus is healthy. It fades as the bus volts sag, which
+     * is the trap: the ignition goes weak exactly when the system is in trouble
+     * and you most need the engine.
+     */
+    fun gridSupply(): Double = clamp((busSupplyPu - 0.62) / 0.33, 0.0, 1.0)
+
+    /**
+     * The shaft-driven exciter set. Dead at rest, strengthening with speed, which
+     * is why it cannot start the engine but is the right place to run it.
+     */
+    fun generatorSupply(rpm: Double): Double {
         val t = clamp((rpm - 55.0) / 165.0, 0.0, 1.0)
         return clamp(t * t * (3 - 2 * t) * 1.05, 0.0, 1.0)
     }
 
-    /** The coil box off the battery: fat at cranking speed, fading as revs rise. */
-    fun batteryOutput(rpm: Double): Double {
+    /** The battery: fat at cranking speed, fading as the revolutions rise. */
+    fun emergencySupply(rpm: Double): Double {
         val speedFade = clamp(1.0 - max(0.0, rpm - 430.0) / 620.0, 0.0, 1.0)
         return clamp(batteryCharge * speedFade, 0.0, 1.0)
     }
@@ -190,9 +207,10 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         }
 
         // ---- starting motor -----------------------------------------------------
-        // Wired through the BAT position only, exactly like the switch it hangs off.
+        // Wired through the emergency battery only, so EMG is the one position
+        // that will turn the engine over.
         starterCranking = starterEngaged &&
-            ctl.ignition == IgnitionMode.BAT &&
+            ctl.ignition == IgnitionMode.EMG &&
             batteryCharge > 0.04 &&
             rpm < Spec.STARTER_STALL_RPM
         if (starterCranking) {
@@ -205,15 +223,21 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         }
 
         // ---- battery housekeeping ----------------------------------------------
-        if (ctl.ignition == IgnitionMode.BAT) {
-            batteryCharge = max(0.0, batteryCharge - dt * 0.0022 * (1.0 + rpm / 600.0))
+        // Only the emergency position draws on the cells; the other two are fed
+        // from the bus or from the machine itself.
+        if (ctl.ignition == IgnitionMode.EMG) {
+            batteryCharge = max(0.0, batteryCharge - dt * 0.0034 * (1.0 + rpm / 600.0))
         }
-        // The panel lamps on DIM and ON come straight off the cells too.
-        if (ctl.ignition.lampDrain > 0.0) {
-            batteryCharge = max(0.0, batteryCharge - dt * ctl.ignition.lampDrain)
+        // The charging set hangs off the station service bus, so the cells only go
+        // back up while that bus is being fed from the grid or from the machine.
+        val serviceForCharging = when (ctl.ignition) {
+            IgnitionMode.GRID -> gridSupply()
+            IgnitionMode.GEN -> generatorSupply(rpm)
+            else -> 0.0
         }
-        if (rpm > 340.0) {
-            batteryCharge = min(1.0, batteryCharge + dt * 0.010 * clamp((rpm - 340.0) / 260.0, 0.0, 1.0))
+        batteryChargingNow = serviceForCharging > 0.35 && batteryCharge < 0.999
+        if (batteryChargingNow) {
+            batteryCharge = min(1.0, batteryCharge + dt * 0.013 * serviceForCharging)
         }
 
         // ---- flooding -----------------------------------------------------------
@@ -310,8 +334,10 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         jacketTempC = 12.0; bearingTempC = 12.0
         oilFilm = 1.0; oilInSump = 1.0; oilPressureKpa = 0.0
         batteryCharge = 1.0; plugFouling = 0.0; floodLevel = 0.0; firingSuccess = 0.0
+        busSupplyPu = 1.0
         knockIndex = 0.0; knockDamage = 0.0; bearingWear = 0.0
         starterEngaged = false; starterCranking = false; starterHeat = 0.0
+        batteryChargingNow = false
         firingPhase = 0.0; revsSincePrime = 0.0; running = false
     }
 }

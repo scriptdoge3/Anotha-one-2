@@ -55,43 +55,43 @@ class PanelRenderer(val L: Layout) {
 
     private var background: Bitmap? = null
     private var backgroundAmbient = -1f
+    private var backgroundTab: Tab? = null
 
     /** Alarms across the annunciator strip, in the order they are wired. */
     private val alarmNames = listOf("OVERSPEED", "LOW OIL", "HOT", "KNOCK", "REV. PWR", "FIELD", "FUSE", "BATTERY")
 
     // ------------------------------------------------------------------ static
 
-    private fun buildBackground(ambient: Float): Bitmap {
+    private fun buildBackground(ambient: Float, tab: Tab): Bitmap {
         val bmp = Bitmap.createBitmap(L.w.toInt(), L.h.toInt(), Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         drawRoom(c, ambient)
         drawHeaderPlate(c, ambient)
         drawGaugeBoardStatic(c, ambient)
-        drawEngineDeckStatic(c, ambient)
-        drawSwitchBoardStatic(c, ambient)
+        if (tab == Tab.CONTROL) drawControlDeckStatic(c, ambient) else drawElectricalDeckStatic(c, ambient)
         drawAnnunciatorStatic(c, ambient)
         return bmp
     }
 
     private fun drawRoom(c: Canvas, ambient: Float) {
-        c.drawColor(Theme.dim(Theme.IRON_DARK, ambient))
-        // the pool of light from the lamp hung over the board
+        c.drawColor(Theme.dim(Theme.PANEL_DARK, ambient))
+        // the wash from the reflector lamps hung over the board
         Theme.fill.alpha = 255
         Theme.fill.shader = RadialGradient(
-            L.w * 0.5f, L.h * 0.30f, L.h * 0.72f,
+            L.w * 0.5f, L.h * 0.26f, L.h * 0.78f,
             intArrayOf(
-                Theme.withAlpha(0xFFFFD9A0.toInt(), (34 * ambient).toInt()),
+                Theme.withAlpha(0xFFD8E6F0.toInt(), (26 * ambient).toInt()),
                 Theme.withAlpha(0xFF000000.toInt(), 0)
             ), null, Shader.TileMode.CLAMP
         )
         c.drawRect(0f, 0f, L.w, L.h, Theme.fill)
         Theme.fill.shader = null
-        // brick courses behind the board, barely visible
-        val brick = Theme.line(Theme.withAlpha(Color.WHITE, (7 * ambient).toInt()), 1.4f)
-        var y = 0f
-        while (y < L.h) {
-            c.drawLine(0f, y, L.w, y, brick)
-            y += L.h * 0.031f
+        // the seams of the sheet steel behind the board
+        val seam = Theme.line(Theme.withAlpha(Color.WHITE, (6 * ambient).toInt()), 1.4f)
+        var x = 0f
+        while (x < L.w) {
+            c.drawLine(x, 0f, x, L.h, seam)
+            x += L.w * 0.125f
         }
     }
 
@@ -100,28 +100,36 @@ class PanelRenderer(val L: Layout) {
         Theme.fill.alpha = 255
         Theme.fill.shader = LinearGradient(
             0f, 0f, 0f, r.bottom,
-            intArrayOf(Theme.dim(Theme.MAHOGANY, ambient), Theme.dim(0xFF2E1A0E.toInt(), ambient)),
-            null, Shader.TileMode.CLAMP
+            intArrayOf(
+                Theme.dim(Theme.PANEL_LIT, ambient),
+                Theme.dim(Theme.PANEL, ambient),
+                Theme.dim(Theme.PANEL_DARK, ambient)
+            ),
+            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP
         )
         c.drawRect(r, Theme.fill)
         Theme.fill.shader = null
-        c.drawLine(0f, r.bottom, L.w, r.bottom, Theme.line(Theme.dim(Theme.BRASS_DARK, ambient), 3f))
+        // a deco band across the foot of the header
+        c.drawLine(0f, r.bottom - 5f, L.w, r.bottom - 5f, Theme.line(Theme.dim(Theme.NICKEL, ambient), 2.4f))
+        c.drawLine(0f, r.bottom, L.w, r.bottom, Theme.line(Theme.dim(Theme.NICKEL_DARK, ambient), 4f))
+        Theme.chevrons(
+            c, RectF(L.w * 0.485f, r.height() * 0.30f, L.w * 0.615f, r.height() * 0.66f),
+            Theme.withAlpha(Theme.NICKEL, (70 * ambient).toInt()), 3
+        )
         Theme.namePlate(
             c,
             RectF(L.w * 0.025f, r.height() * 0.19f, L.w * 0.470f, r.height() * 0.81f),
-            "MILLBROOK ELECTRIC LIGHT & POWER", r.height() * 0.30f, ambient
+            "MILLBROOK LIGHT & POWER Co.", r.height() * 0.30f, ambient
         )
     }
 
     private fun drawGaugeBoardStatic(c: Canvas, ambient: Float) {
         val r = RectF(L.w * 0.012f, L.gaugeBoard.top + 4f, L.w * 0.988f, L.gaugeBoard.bottom - 4f)
-        Theme.ironPlate(c, r, 12f)
-        val n = 9
-        for (i in 0 until n) {
-            val x = r.left + r.width() * (i + 0.5f) / n
-            Theme.rivet(c, x, r.top + 11f, 6.5f)
-            Theme.rivet(c, x, r.bottom - 11f, 6.5f)
-        }
+        Theme.panelPlate(c, r, 8f)
+        Theme.screw(c, r.left + 18f, r.top + 18f, 7f)
+        Theme.screw(c, r.right - 18f, r.top + 18f, 7f, 68f)
+        Theme.screw(c, r.left + 18f, r.bottom - 18f, 7f, 112f)
+        Theme.screw(c, r.right - 18f, r.bottom - 18f, 7f, 18f)
 
         Instruments.drawSynchroscopeFace(c, L.synchroscope.x, L.synchroscope.y, L.bigR, ambient)
         freqDial.drawFace(c, ambient)
@@ -131,10 +139,10 @@ class PanelRenderer(val L: Layout) {
             L.lamps[0].x - L.lampR * 2.0f, L.lampY - L.lampR * 1.55f,
             L.lamps[2].x + L.lampR * 2.0f, L.lampY + L.lampR * 1.55f
         )
-        Theme.ironPlate(c, lr, 8f, 0.5f)
+        Theme.panelPlate(c, lr, 8f, 0.5f)
         Theme.engrave(
             c, "SYNCHRONISING LAMPS", lr.centerX(), lr.top - L.lampR * 0.42f,
-            L.lampR * 0.56f, Theme.dim(Theme.BRASS_LIT, ambient)
+            L.lampR * 0.56f, Theme.dim(Theme.NICKEL_LIT, ambient)
         )
 
         genVoltsDial.drawFace(c, ambient)
@@ -143,21 +151,23 @@ class PanelRenderer(val L: Layout) {
         ampDial.drawFace(c, ambient)
     }
 
-    private fun drawEngineDeckStatic(c: Canvas, ambient: Float) {
-        val r = RectF(L.w * 0.012f, L.engineDeck.top + 4f, L.w * 0.988f, L.engineDeck.bottom - 4f)
-        Theme.ironPlate(c, r, 12f, 0.7f)
-        Theme.rivet(c, r.left + 14f, r.top + 14f, 6f)
-        Theme.rivet(c, r.right - 14f, r.top + 14f, 6f)
-        Theme.rivet(c, r.left + 14f, r.bottom - 14f, 6f)
-        Theme.rivet(c, r.right - 14f, r.bottom - 14f, 6f)
+    private fun drawControlDeckStatic(c: Canvas, ambient: Float) {
+        val r = RectF(L.w * 0.012f, L.deck.top + 4f, L.w * 0.988f, L.deck.bottom - 4f)
+        Theme.panelPlate(c, r, 8f, 0.7f)
+        Theme.screw(c, r.left + 18f, r.top + 18f, 7f, 40f)
+        Theme.screw(c, r.right - 18f, r.top + 18f, 7f, 96f)
+        Theme.screw(c, r.left + 18f, r.bottom - 18f, 7f, 14f)
+        Theme.screw(c, r.right - 18f, r.bottom - 18f, 7f, 74f)
 
         tachDial.drawFace(c, ambient)
         oilDial.drawFace(c, ambient)
         tempDial.drawFace(c, ambient)
     }
 
-    private fun drawSwitchBoardStatic(c: Canvas, ambient: Float) {
-        Theme.slatePanel(c, L.boardPlate)
+    private fun drawElectricalDeckStatic(c: Canvas, ambient: Float) {
+        val r = RectF(L.w * 0.012f, L.deck.top + 4f, L.w * 0.988f, L.deck.bottom - 4f)
+        Theme.panelPlate(c, r, 8f, 0.7f, pinstripe = false)
+        Theme.boardPanel(c, L.boardPlate)
         Theme.screw(c, L.boardPlate.left + 16f, L.boardPlate.top + 16f, 8f)
         Theme.screw(c, L.boardPlate.right - 16f, L.boardPlate.top + 16f, 8f, 70f)
         Theme.screw(c, L.boardPlate.left + 16f, L.boardPlate.bottom - 16f, 8f, 110f)
@@ -169,17 +179,17 @@ class PanelRenderer(val L: Layout) {
         Theme.fill.alpha = 255
         Theme.fill.shader = LinearGradient(
             0f, r.top, 0f, r.bottom,
-            intArrayOf(Theme.dim(0xFF201C15.toInt(), ambient), Theme.dim(Theme.IRON_DARK, ambient)),
+            intArrayOf(Theme.dim(0xFF201C15.toInt(), ambient), Theme.dim(Theme.PANEL_DARK, ambient)),
             null, Shader.TileMode.CLAMP
         )
         c.drawRect(r, Theme.fill)
         Theme.fill.shader = null
-        c.drawLine(0f, r.top, L.w, r.top, Theme.line(Theme.dim(Theme.BRASS_DARK, ambient), 2.5f))
+        c.drawLine(0f, r.top, L.w, r.top, Theme.line(Theme.dim(Theme.NICKEL_DARK, ambient), 2.5f))
         for (i in alarmNames.indices) {
             val p = L.alarmPos(i, alarmNames.size)
             Theme.engrave(
                 c, alarmNames[i], p.x, r.bottom - r.height() * 0.14f,
-                L.alarmR * 0.62f, Theme.dim(Theme.BRASS_DARK, ambient)
+                L.alarmR * 0.62f, Theme.dim(Theme.NICKEL_DARK, ambient)
             )
         }
     }
@@ -188,30 +198,89 @@ class PanelRenderer(val L: Layout) {
 
     /** How much light there is in the room to read the board by. */
     fun ambientFor(p: Plant): Float {
-        val kerosene = 0.30f
+        val standby = 0.42f      // the emergency oil lamps over the board
         val house = if (p.grid.busVolts > Spec.RATED_VOLTS * 0.55) {
             (p.grid.busVolts / Spec.RATED_VOLTS).coerceIn(0f.toDouble(), 1.15).toFloat() * 0.55f
         } else 0f
-        val panel = (p.ctl.ignition.panelLamps * p.engine.batteryCharge).toFloat() * 0.32f
-        return (kerosene + house + panel).coerceIn(0.30f, 1.0f)
+        val panel = p.panelLampLevel().toFloat() * 0.30f
+        return (standby + house + panel).coerceIn(0.45f, 1.0f)
     }
 
-    fun draw(c: Canvas, p: Plant, now: Long, crankAngle: Float, crankEffort: Float, pressed: Set<String>) {
+    fun draw(
+        c: Canvas, p: Plant, now: Long, crankAngle: Float, crankEffort: Float,
+        pressed: Set<String>, tab: Tab = Tab.CONTROL
+    ) {
         val ambient = ambientFor(p)
-        // Rebuild the cached ironwork only when the light in the room really changes.
-        if (background == null || abs(backgroundAmbient - ambient) > 0.045f) {
+        // Rebuild the cached steelwork only when the light or the deck changes.
+        if (background == null || backgroundTab != tab || abs(backgroundAmbient - ambient) > 0.045f) {
             background?.recycle()
-            background = buildBackground(ambient)
+            background = buildBackground(ambient, tab)
             backgroundAmbient = ambient
+            backgroundTab = tab
         }
         c.drawBitmap(background!!, 0f, 0f, null)
 
         drawHeaderLive(c, p, ambient)
         drawGaugesLive(c, p, ambient, now)
-        drawEngineLive(c, p, ambient, crankAngle, crankEffort, pressed)
-        drawSwitchboardLive(c, p, ambient)
+        if (tab == Tab.CONTROL) {
+            drawControlLive(c, p, ambient, crankAngle, crankEffort, pressed)
+        } else {
+            Mimic.draw(c, L.mimic, p, ambient, (now % 100000L) / 1000f)
+            drawSwitchboardLive(c, p, ambient)
+        }
+        drawTabBar(c, p, ambient, tab)
         drawAnnunciatorLive(c, p, ambient, now)
         if (p.ended) drawEndCard(c, p)
+    }
+
+    /** The two decks, and which one you are looking at. */
+    private fun drawTabBar(c: Canvas, p: Plant, ambient: Float, tab: Tab) {
+        Theme.fill.alpha = 255
+        Theme.fill.shader = LinearGradient(
+            0f, L.tabBar.top, 0f, L.tabBar.bottom,
+            intArrayOf(Theme.dim(Theme.PANEL, ambient), Theme.dim(Theme.PANEL_DARK, ambient)),
+            null, Shader.TileMode.CLAMP
+        )
+        c.drawRect(L.tabBar, Theme.fill)
+        Theme.fill.shader = null
+        c.drawLine(0f, L.tabBar.top, L.w, L.tabBar.top, Theme.line(Theme.dim(Theme.NICKEL_DARK, ambient), 2f))
+
+        for ((i, t) in Tab.entries.withIndex()) {
+            val r = L.tabRect(i)
+            val on = t == tab
+            if (on) {
+                Theme.fill.alpha = 255
+                Theme.fill.shader = LinearGradient(
+                    0f, r.top, 0f, r.bottom,
+                    intArrayOf(Theme.dim(Theme.PANEL_LIT, ambient), Theme.dim(Theme.PANEL, ambient)),
+                    null, Shader.TileMode.CLAMP
+                )
+                c.drawRect(RectF(r.left + 3f, r.top + 3f, r.right - 3f, r.bottom), Theme.fill)
+                Theme.fill.shader = null
+                c.drawLine(r.left + 3f, r.top + 3f, r.right - 3f, r.top + 3f,
+                    Theme.line(Theme.dim(Theme.ACCENT, ambient), 4f))
+            }
+            Theme.engrave(
+                c, t.label, r.centerX(), r.centerY() + r.height() * 0.14f,
+                r.height() * 0.34f,
+                Theme.dim(if (on) Theme.MARK else Theme.MARK_SOFT, ambient)
+            )
+            if (i > 0) c.drawLine(r.left, r.top + 8f, r.left, r.bottom - 8f,
+                Theme.line(Theme.dim(Theme.NICKEL_DARK, ambient), 1.6f))
+        }
+
+        // A small warning pip on whichever deck is not showing but wants attention.
+        val other = if (tab == Tab.CONTROL) Tab.ELECTRICAL else Tab.CONTROL
+        val wants = if (other == Tab.CONTROL) {
+            p.engine.oilFilm < 0.5 || p.engine.jacketTempC > 105 || p.rpm > Spec.OVERSPEED_RPM
+        } else {
+            p.grid.feeders.any { it.fuseBlown } || p.outputKw < -4.0 ||
+                abs(p.grid.busHz - 60.0) > 1.6
+        }
+        if (wants) {
+            val r = L.tabRect(other.ordinal)
+            Theme.lamp(c, r.right - r.height() * 0.42f, r.centerY(), r.height() * 0.16f, Theme.LAMP_RED, 1f)
+        }
     }
 
     private fun drawHeaderLive(c: Canvas, p: Plant, ambient: Float) {
@@ -219,14 +288,14 @@ class PanelRenderer(val L: Layout) {
         val right = L.w * 0.985f
         Theme.engrave(
             c, p.clockText(), right, h.centerY() - h.height() * 0.10f,
-            h.height() * 0.30f, Theme.dim(Theme.BRASS_LIT, ambient), Paint.Align.RIGHT
+            h.height() * 0.30f, Theme.dim(Theme.NICKEL_LIT, ambient), Paint.Align.RIGHT
         )
         val kw = p.grid.demandW / 1000.0
         val secs = p.grid.secondsToChange
         Theme.engrave(
             c, "TOWN LOAD %.0f KW   NEXT IN %02d".format(kw, secs.toInt()), right,
             h.centerY() + h.height() * 0.30f, h.height() * 0.235f,
-            Theme.dim(if (secs < 8.0) Theme.LAMP_AMBER else Theme.BRASS, ambient), Paint.Align.RIGHT
+            Theme.dim(if (secs < 8.0) Theme.LAMP_AMBER else Theme.NICKEL, ambient), Paint.Align.RIGHT
         )
     }
 
@@ -237,7 +306,7 @@ class PanelRenderer(val L: Layout) {
 
         freqDial.drawNeedle(c, p.hz, ambient)
         // A second, red pointer showing where the bus actually is.
-        freqDial.drawNeedle(c, p.grid.busHz, ambient, Theme.DANGER)
+        freqDial.drawNeedle(c, p.grid.busHz, ambient, Theme.ACCENT)
         Theme.dialGlass(c, L.freqDial.x, L.freqDial.y, L.bigR)
 
         val lampB = p.lampBrightness().toFloat()
@@ -255,7 +324,7 @@ class PanelRenderer(val L: Layout) {
         Theme.dialGlass(c, L.ammeter.x, L.ammeter.y, L.smallR)
     }
 
-    private fun drawEngineLive(
+    private fun drawControlLive(
         c: Canvas, p: Plant, ambient: Float, crankAngle: Float, crankEffort: Float, pressed: Set<String>
     ) {
         tachDial.drawNeedle(c, p.rpm, ambient)
@@ -273,17 +342,17 @@ class PanelRenderer(val L: Layout) {
         )
 
         Widgets.quadrantLever(
-            c, L.throttleLever, p.ctl.throttle.toFloat(), "THROTTLE", "OPEN", "SHUT", ambient
+            c, L.throttleLever, p.ctl.throttle.toFloat(), "THROTTLE", "OPEN", "SHUT", ambient, Theme.ACCENT
         )
         Widgets.quadrantLever(
-            c, L.sparkLever, p.ctl.sparkLever.toFloat(), "SPARK", "ADV.", "RET.", ambient, Theme.BRASS_GREEN
+            c, L.sparkLever, p.ctl.sparkLever.toFloat(), "SPARK", "ADV.", "RET.", ambient, Theme.ACCENT_COOL
         )
         Widgets.handwheel(
             c, L.mixtureKnob.x, L.mixtureKnob.y, L.mixtureKnobR, p.ctl.mixture.toFloat(), "MIXTURE", ambient
         )
         Widgets.handwheel(
             c, L.excitationKnob.x, L.excitationKnob.y, L.excitationKnobR, p.ctl.excitation.toFloat(),
-            "FIELD RHEO.", ambient, Theme.BRASS_GREEN
+            "FIELD RHEO.", ambient, Theme.ACCENT_COOL
         )
 
         Widgets.toggleLever(
@@ -296,7 +365,7 @@ class PanelRenderer(val L: Layout) {
         Widgets.crank(c, L.crankHandle.x, L.crankHandle.y, L.crankR, crankAngle, crankEffort, ambient)
         Widgets.pushButton(
             c, L.starterButton.x, L.starterButton.y, L.starterR, p.engine.starterEngaged,
-            "STARTER", ambient, if (p.engine.starterCranking) Theme.LAMP_AMBER else Theme.BRASS
+            "STARTER", ambient, if (p.engine.starterCranking) Theme.LAMP_AMBER else Theme.NICKEL
         )
         Widgets.handwheel(
             c, L.waterWheel.x, L.waterWheel.y, L.waterWheelR, p.ctl.waterValve.toFloat(), "WATER", ambient
@@ -367,7 +436,7 @@ class PanelRenderer(val L: Layout) {
         val textW = boxW - L.w * 0.090f
 
         // Wrap the account of what went wrong before deciding how tall the card is.
-        val wrapPaint = Theme.label(bodySize, Theme.IVORY_SHADE, false)
+        val wrapPaint = Theme.label(bodySize, Theme.MARK_SOFT, false)
         val lines = ArrayList<String>()
         var lineText = ""
         for (w in p.failure.detail.split(" ")) {
@@ -391,7 +460,7 @@ class PanelRenderer(val L: Layout) {
         val boxH = padTop * 2 + plateH + bodySize * (1.6f + lines.size * 1.45f) +
             bodySize * (0.9f + rows.size * 1.35f) + bodySize * 3.4f
         val box = RectF(cx - boxW / 2, (L.h - boxH) / 2f, cx + boxW / 2, (L.h + boxH) / 2f)
-        Theme.ironPlate(c, box, 14f)
+        Theme.panelPlate(c, box, 14f)
 
         Theme.namePlate(
             c, RectF(box.left + L.w * 0.030f, box.top + padTop, box.right - L.w * 0.030f, box.top + padTop + plateH),
@@ -400,19 +469,19 @@ class PanelRenderer(val L: Layout) {
 
         var y = box.top + padTop + plateH + bodySize * 1.6f
         for (line in lines) {
-            c.drawText(line, cx, y, Theme.label(bodySize, Theme.IVORY_SHADE, false))
+            c.drawText(line, cx, y, Theme.label(bodySize, Theme.MARK_SOFT, false))
             y += bodySize * 1.45f
         }
         y += bodySize * 0.9f
         for ((k, v) in rows) {
-            Theme.engrave(c, k, box.left + L.w * 0.045f, y, bodySize * 0.95f, Theme.BRASS, Paint.Align.LEFT)
-            Theme.engrave(c, v, box.right - L.w * 0.045f, y, bodySize * 0.95f, Theme.IVORY, Paint.Align.RIGHT)
+            Theme.engrave(c, k, box.left + L.w * 0.045f, y, bodySize * 0.95f, Theme.NICKEL, Paint.Align.LEFT)
+            Theme.engrave(c, v, box.right - L.w * 0.045f, y, bodySize * 0.95f, Theme.MARK, Paint.Align.RIGHT)
             y += bodySize * 1.35f
         }
         y += bodySize * 0.9f
         Theme.engrave(c, "SHIFT MARK  ${p.score()}", cx, y, bodySize * 1.45f, Theme.LAMP_AMBER)
         y += bodySize * 1.8f
-        Theme.engrave(c, "TOUCH TO TAKE ANOTHER SHIFT", cx, y, bodySize * 0.95f, Theme.BRASS_DARK)
+        Theme.engrave(c, "TOUCH TO TAKE ANOTHER SHIFT", cx, y, bodySize * 0.95f, Theme.NICKEL_DARK)
     }
 
     fun release() {

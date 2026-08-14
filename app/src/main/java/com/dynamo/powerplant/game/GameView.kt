@@ -11,6 +11,7 @@ import com.dynamo.powerplant.sim.IgnitionMode
 import com.dynamo.powerplant.sim.Plant
 import com.dynamo.powerplant.ui.Layout
 import com.dynamo.powerplant.ui.PanelRenderer
+import com.dynamo.powerplant.ui.Tab
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
@@ -41,6 +42,10 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
     private var crankLastAngle = 0f
     private var crankAccum = 0f
     private var crankLastTrigger = 0L
+
+    /** Which deck is showing. The instrument board above it is always in view. */
+    var tab: Tab = Tab.CONTROL
+        private set
 
     private var keyLastMove = 0L
     private val pressed = HashSet<String>()
@@ -109,7 +114,7 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
                         c.save()
                         c.translate(offX, offY)
                         c.scale(scale, scale)
-                        renderer?.draw(c, plant, System.currentTimeMillis(), crankAngle, crankEffort, pressed)
+                        renderer?.draw(c, plant, System.currentTimeMillis(), crankAngle, crankEffort, pressed, tab)
                         c.restore()
                     }
                 } finally {
@@ -163,9 +168,28 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
 
         if (p.ended) {
             p.reset()
+            tab = Tab.CONTROL
             renderer?.release()
             return
         }
+
+        // --- the tab bar is live whichever deck is showing ---
+        if (l.tabBar.contains(x, y)) {
+            for ((i, t) in Tab.entries.withIndex()) {
+                if (l.tabRect(i).contains(x, y) && t != tab) {
+                    tab = t
+                    renderer?.release()
+                    audio.tick()
+                }
+            }
+            return
+        }
+
+        if (tab == Tab.CONTROL) onDownControl(l, id, x, y) else onDownElectrical(l, id, x, y)
+    }
+
+    private fun onDownControl(l: Layout, id: Int, x: Float, y: Float) {
+        val p = plant
 
         // --- levers and wheels take a grab so the drag is relative ---
         if (l.throttleLever.contains(x, y)) { grabs[id] = Grab("throttle", x, y, p.ctl.throttle); return }
@@ -199,6 +223,10 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
             p.ctl.compressionRelease = !p.ctl.compressionRelease
             return
         }
+    }
+
+    private fun onDownElectrical(l: Layout, id: Int, x: Float, y: Float) {
+        val p = plant
         if (l.mainBreaker.contains(x, y)) { p.toggleBreaker(); audio.clunk(); return }
         if (l.fieldSwitch.contains(x, y)) { p.ctl.fieldSwitchClosed = !p.ctl.fieldSwitchClosed; audio.clunk(); return }
         for (i in l.feeders.indices) {

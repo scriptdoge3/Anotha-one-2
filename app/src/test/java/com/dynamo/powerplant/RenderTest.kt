@@ -6,6 +6,7 @@ import com.dynamo.powerplant.sim.IgnitionMode
 import com.dynamo.powerplant.sim.Plant
 import com.dynamo.powerplant.ui.Layout
 import com.dynamo.powerplant.ui.PanelRenderer
+import com.dynamo.powerplant.ui.Tab
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -43,17 +44,28 @@ class RenderTest {
         p.ctl.throttle = (p.ctl.throttle + (err * 0.075 - rate * 0.30) * dt).coerceIn(0.0, 1.0)
     }
 
+    /** Turn the selector one notch at a time in whichever direction is needed. */
+    private fun sweepTo(p: Plant, target: IgnitionMode, secondsPerNotch: Double = 0.25) {
+        var guard = 0
+        while (p.ctl.ignition != target && guard++ < 12) {
+            p.ctl.ignition =
+                if (target.ordinal > p.ctl.ignition.ordinal) p.ctl.ignition.clockwise()
+                else p.ctl.ignition.anticlockwise()
+            run(p, secondsPerNotch)
+        }
+    }
+
     private fun run(p: Plant, seconds: Double, each: (Plant) -> Unit = {}) {
         val dt = 1.0 / 60.0
         var t = 0.0
         while (t < seconds && !p.ended) { each(p); p.step(dt); t += dt }
     }
 
-    private fun shoot(name: String, p: Plant, crank: Float = 0f, effort: Float = 0f) {
+    private fun shoot(name: String, p: Plant, crank: Float = 0f, effort: Float = 0f, tab: Tab = Tab.CONTROL) {
         val l = Layout(Layout.VIRTUAL_W, 2340f)
         val r = PanelRenderer(l)
         val bmp = Bitmap.createBitmap(l.w.toInt(), l.h.toInt(), Bitmap.Config.ARGB_8888)
-        r.draw(Canvas(bmp), p, 1000L, crank, effort, emptySet())
+        r.draw(Canvas(bmp), p, 1000L, crank, effort, emptySet(), tab)
         val f = File(outDir, "$name.png")
         f.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         r.release()
@@ -79,7 +91,7 @@ class RenderTest {
         p.ctl.oilerRate = 0.5
         p.prime()
         p.ctl.compressionRelease = true
-        p.ctl.ignition = IgnitionMode.BAT
+        p.ctl.ignition = IgnitionMode.EMG
         p.engine.starterEngaged = true
         run(p, 2.5)
         shoot("02-cranking", p, crank = 1.1f, effort = 0.9f)
@@ -92,14 +104,11 @@ class RenderTest {
         p.ctl.waterValve = 0.30; p.ctl.oilerRate = 0.55
         p.ctl.mixture = 0.88; p.ctl.sparkLever = 0.12; p.ctl.throttle = 0.35
         p.prime(); p.ctl.compressionRelease = true
-        p.ctl.ignition = IgnitionMode.BAT; p.engine.starterEngaged = true
+        p.ctl.ignition = IgnitionMode.EMG; p.engine.starterEngaged = true
         run(p, 3.5); p.ctl.compressionRelease = false; run(p, 5.0)
         p.engine.starterEngaged = false
         run(p, 50.0) { trim(it); hold(it, 60.0, 1.0 / 60.0) }
-        var g = 0
-        while (p.ctl.ignition != IgnitionMode.MAG && g++ < 12) {
-            p.ctl.ignition = p.ctl.ignition.clockwise(); run(p, 0.25)
-        }
+        sweepTo(p, IgnitionMode.GEN)
         run(p, 20.0) {
             trim(it); hold(it, it.grid.busHz + 0.10, 1.0 / 60.0)
             it.ctl.excitation = (it.ctl.excitation + (it.grid.busVolts - it.genVolts) * 0.0035 / 60.0).coerceIn(0.0, 1.0)
@@ -117,14 +126,11 @@ class RenderTest {
         p.ctl.waterValve = 0.30; p.ctl.oilerRate = 0.55
         p.ctl.mixture = 0.88; p.ctl.sparkLever = 0.12; p.ctl.throttle = 0.35
         p.prime(); p.ctl.compressionRelease = true
-        p.ctl.ignition = IgnitionMode.BAT; p.engine.starterEngaged = true
+        p.ctl.ignition = IgnitionMode.EMG; p.engine.starterEngaged = true
         run(p, 3.5); p.ctl.compressionRelease = false; run(p, 5.0)
         p.engine.starterEngaged = false
         run(p, 50.0) { trim(it); hold(it, 60.0, 1.0 / 60.0) }
-        var g = 0
-        while (p.ctl.ignition != IgnitionMode.MAG && g++ < 12) {
-            p.ctl.ignition = p.ctl.ignition.clockwise(); run(p, 0.25)
-        }
+        sweepTo(p, IgnitionMode.GEN)
         run(p, 50.0) {
             trim(it); hold(it, it.grid.busHz + 0.10, 1.0 / 60.0)
             it.ctl.excitation = (it.ctl.excitation + (it.grid.busVolts - it.genVolts) * 0.0035 / 60.0).coerceIn(0.0, 1.0)
@@ -140,6 +146,15 @@ class RenderTest {
         p.toggleFeeder(3)
         run(p, 90.0) { trim(it); hold(it, 60.0, 1.0 / 60.0) }
         shoot("04-on-the-bus", p)
+        shoot("06-electrical-tied", p, tab = Tab.ELECTRICAL)
+    }
+
+    @Test
+    fun theElectricalDeckBeforeAnythingIsRunning() {
+        val p = Plant(106)
+        p.ctl.ignition = IgnitionMode.GRID
+        run(p, 3.0)
+        shoot("07-electrical-cold", p, tab = Tab.ELECTRICAL)
     }
 
     @Test
@@ -149,7 +164,7 @@ class RenderTest {
         p.ctl.waterValve = 0.30; p.ctl.oilerRate = 0.55
         p.ctl.mixture = 0.88; p.ctl.sparkLever = 0.12; p.ctl.throttle = 0.35
         p.prime(); p.ctl.compressionRelease = true
-        p.ctl.ignition = IgnitionMode.BAT; p.engine.starterEngaged = true
+        p.ctl.ignition = IgnitionMode.EMG; p.engine.starterEngaged = true
         run(p, 3.5); p.ctl.compressionRelease = false; run(p, 5.0)
         p.engine.starterEngaged = false
         run(p, 50.0) { trim(it); hold(it, 60.0, 1.0 / 60.0) }

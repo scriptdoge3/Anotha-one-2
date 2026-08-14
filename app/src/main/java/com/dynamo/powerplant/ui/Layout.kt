@@ -2,10 +2,16 @@ package com.dynamo.powerplant.ui
 
 import android.graphics.RectF
 
+enum class Tab(val label: String) { CONTROL("CONTROL"), ELECTRICAL("ELECTRICAL") }
+
 /**
  * The board is laid out in a virtual space 1080 wide and as tall as the phone's
  * aspect ratio calls for, so it fills the screen edge to edge on anything from
  * a 16:9 handset to a 21:9 one without letterboxing.
+ *
+ * The instrument board across the top is always in view. Below it the panel
+ * switches between the engine controls and the switchboard, which is the walk
+ * an operator makes between the machine and the board.
  */
 class Layout(val w: Float, val h: Float) {
 
@@ -15,15 +21,23 @@ class Layout(val w: Float, val h: Float) {
             (VIRTUAL_W * viewH / viewW.toFloat()).coerceIn(1780f, 2680f)
     }
 
-    val header = RectF(0f, 0f, w, h * 0.056f)
-    val annunciator = RectF(0f, h - h * 0.058f, w, h)
+    val header = RectF(0f, 0f, w, h * 0.054f)
+    val annunciator = RectF(0f, h - h * 0.056f, w, h)
+    val tabBar = RectF(0f, annunciator.top - h * 0.050f, w, annunciator.top)
 
     private val contentTop = header.bottom
-    private val contentH = annunciator.top - contentTop
+    private val contentH = tabBar.top - contentTop
 
+    /** Always in view: the electrical instruments and the synchronising gear. */
     val gaugeBoard = RectF(0f, contentTop, w, contentTop + contentH * 0.395f)
-    val engineDeck = RectF(0f, gaugeBoard.bottom, w, gaugeBoard.bottom + contentH * 0.350f)
-    val switchBoard = RectF(0f, engineDeck.bottom, w, annunciator.top)
+
+    /** Whichever deck the tab bar has selected. */
+    val deck = RectF(0f, gaugeBoard.bottom, w, tabBar.top)
+
+    fun tabRect(i: Int): RectF {
+        val each = w / 2f
+        return RectF(each * i, tabBar.top, each * (i + 1), tabBar.bottom)
+    }
 
     // ---------------------------------------------------------------- gauges
     private val gb = gaugeBoard
@@ -44,58 +58,66 @@ class Layout(val w: Float, val h: Float) {
     val wattmeter = Pt(w * 0.616f, smallY)
     val ammeter = Pt(w * 0.848f, smallY)
 
-    // ---------------------------------------------------------------- engine deck
-    private val ed = engineDeck
-    val engR = minOf(w * 0.088f, ed.height() * 0.145f)
-    private val engGaugeY = ed.top + ed.height() * 0.030f + engR
+    // ---------------------------------------------------------------- control deck
+    private val cd = deck
+    val engR = minOf(w * 0.098f, cd.height() * 0.125f)
+    private val engGaugeY = cd.top + cd.height() * 0.028f + engR
     val tachometer = Pt(w * 0.170f, engGaugeY)
     val oilGauge = Pt(w * 0.500f, engGaugeY)
     val tempGauge = Pt(w * 0.830f, engGaugeY)
 
-    private val ctlTop = engGaugeY + engR * 1.15f + ed.height() * 0.045f
-    private val ctlH = ed.height() * 0.355f
+    private val ctlTop = engGaugeY + engR * 1.15f + cd.height() * 0.030f
+    private val ctlH = cd.height() * 0.415f
 
     /** The five mains, side by side, in the order you use them. */
-    val keySwitchR = minOf(w * 0.090f, ctlH * 0.40f)
-    val keySwitch = Pt(w * 0.160f, ctlTop + ctlH * 0.46f)
-    val throttleLever = RectF(w * 0.268f, ctlTop, w * 0.384f, ctlTop + ctlH)
-    val sparkLever = RectF(w * 0.408f, ctlTop, w * 0.524f, ctlTop + ctlH)
-    val mixtureKnobR = minOf(w * 0.076f, ctlH * 0.33f)
-    val mixtureKnob = Pt(w * 0.658f, ctlTop + ctlH * 0.44f)
-    val excitationKnobR = minOf(w * 0.076f, ctlH * 0.33f)
-    val excitationKnob = Pt(w * 0.868f, ctlTop + ctlH * 0.44f)
+    val keySwitchR = minOf(w * 0.100f, ctlH * 0.42f)
+    val keySwitch = Pt(w * 0.150f, ctlTop + ctlH * 0.46f)
+    val throttleLever = RectF(w * 0.278f, ctlTop, w * 0.394f, ctlTop + ctlH)
+    val sparkLever = RectF(w * 0.418f, ctlTop, w * 0.534f, ctlTop + ctlH)
+    val mixtureKnobR = minOf(w * 0.084f, ctlH * 0.33f)
+    val mixtureKnob = Pt(w * 0.662f, ctlTop + ctlH * 0.44f)
+    val excitationKnobR = minOf(w * 0.084f, ctlH * 0.33f)
+    val excitationKnob = Pt(w * 0.872f, ctlTop + ctlH * 0.44f)
 
-    /** Starting gear and the auxiliaries along the bottom of the engine deck. */
-    private val auxTop = ctlTop + ctlH + ed.height() * 0.045f
-    private val auxH = ed.bottom - auxTop - ed.height() * 0.030f
-    val compRelease = RectF(w * 0.028f, auxTop, w * 0.178f, auxTop + auxH)
-    val primerButton = Pt(w * 0.262f, auxTop + auxH * 0.42f)
-    val primerR = minOf(w * 0.050f, auxH * 0.28f)
-    val crankHandle = Pt(w * 0.435f, auxTop + auxH * 0.42f)
-    val crankR = minOf(w * 0.076f, auxH * 0.38f)
-    val starterButton = Pt(w * 0.608f, auxTop + auxH * 0.42f)
-    val starterR = minOf(w * 0.050f, auxH * 0.28f)
-    val waterWheelR = minOf(w * 0.056f, auxH * 0.31f)
-    val waterWheel = Pt(w * 0.762f, auxTop + auxH * 0.42f)
-    val oilerWheelR = minOf(w * 0.056f, auxH * 0.31f)
-    val oilerWheel = Pt(w * 0.922f, auxTop + auxH * 0.42f)
+    /** Starting gear and the auxiliaries along the bottom of the control deck. */
+    private val auxTop = ctlTop + ctlH + cd.height() * 0.038f
+    private val auxH = cd.bottom - auxTop - cd.height() * 0.030f
+    val compRelease = RectF(w * 0.026f, auxTop + auxH * 0.02f, w * 0.208f, auxTop + auxH * 0.80f)
+    val primerButton = Pt(w * 0.272f, auxTop + auxH * 0.40f)
+    val primerR = minOf(w * 0.052f, auxH * 0.26f)
+    val crankHandle = Pt(w * 0.442f, auxTop + auxH * 0.40f)
+    val crankR = minOf(w * 0.080f, auxH * 0.34f)
+    val starterButton = Pt(w * 0.612f, auxTop + auxH * 0.40f)
+    val starterR = minOf(w * 0.052f, auxH * 0.26f)
+    val waterWheelR = minOf(w * 0.058f, auxH * 0.28f)
+    val waterWheel = Pt(w * 0.758f, auxTop + auxH * 0.40f)
+    val oilerWheelR = minOf(w * 0.058f, auxH * 0.28f)
+    val oilerWheel = Pt(w * 0.912f, auxTop + auxH * 0.40f)
 
-    // ---------------------------------------------------------------- switchboard
-    private val sb = switchBoard
-    val boardPlate = RectF(w * 0.020f, sb.top + sb.height() * 0.045f, w * 0.980f, sb.bottom - sb.height() * 0.045f)
+    // ---------------------------------------------------------------- electrical deck
+    /** The mimic diagram takes the upper part of the switchboard. */
+    val mimic = RectF(
+        w * 0.020f, deck.top + deck.height() * 0.028f,
+        w * 0.980f, deck.top + deck.height() * 0.555f
+    )
+
+    val boardPlate = RectF(
+        w * 0.020f, mimic.bottom + deck.height() * 0.035f,
+        w * 0.980f, deck.bottom - deck.height() * 0.022f
+    )
     val mainBreaker = RectF(
-        boardPlate.left + w * 0.022f, boardPlate.top + sb.height() * 0.085f,
-        boardPlate.left + w * 0.300f, boardPlate.bottom - sb.height() * 0.075f
+        boardPlate.left + w * 0.022f, boardPlate.top + boardPlate.height() * 0.070f,
+        boardPlate.left + w * 0.290f, boardPlate.bottom - boardPlate.height() * 0.060f
     )
     val fieldSwitch = RectF(
         mainBreaker.right + w * 0.022f, mainBreaker.top,
-        mainBreaker.right + w * 0.150f, mainBreaker.bottom
+        mainBreaker.right + w * 0.148f, mainBreaker.bottom
     )
 
     /** Four feeder knife switches out to the town. */
     val feeders: List<RectF> = run {
-        val left = fieldSwitch.right + w * 0.026f
-        val right = boardPlate.right - w * 0.020f
+        val left = fieldSwitch.right + w * 0.024f
+        val right = boardPlate.right - w * 0.018f
         val each = (right - left) / 4f
         (0 until 4).map {
             RectF(left + each * it + each * 0.06f, mainBreaker.top, left + each * (it + 1) - each * 0.06f, mainBreaker.bottom)

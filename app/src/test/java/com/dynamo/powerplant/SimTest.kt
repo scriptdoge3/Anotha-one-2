@@ -1,5 +1,7 @@
 package com.dynamo.powerplant
 
+import com.dynamo.powerplant.sim.Controls
+import com.dynamo.powerplant.sim.Engine
 import com.dynamo.powerplant.sim.Failure
 import com.dynamo.powerplant.sim.IgnitionMode
 import com.dynamo.powerplant.sim.Plant
@@ -76,7 +78,7 @@ class SimTest {
         p.ctl.throttle = 0.35
         p.prime()
         p.ctl.compressionRelease = true
-        p.ctl.ignition = IgnitionMode.BAT
+        p.ctl.ignition = IgnitionMode.EMG
         p.engine.starterEngaged = true
         run(p, 3.5)
         p.ctl.compressionRelease = false     // drop the release and let it fire
@@ -84,7 +86,7 @@ class SimTest {
         p.engine.starterEngaged = false
 
         run(p, 50.0) { tend(it) }
-        sweepKeyTo(p, IgnitionMode.MAG, 0.25)   // a brisk sweep across the dead positions
+        sweepKeyTo(p, IgnitionMode.GEN, 0.25)   // a brisk sweep across the dead notch
         run(p, 15.0) { tend(it) }
         return p.running && !p.ended
     }
@@ -92,81 +94,126 @@ class SimTest {
     // ------------------------------------------------------------------ ignition
 
     @Test
-    fun keySwitchPositionsAreInTheModelTOrder() {
+    fun selectorPositionsAreInOrder() {
         val order = IgnitionMode.entries.map { it.label }
-        assertEquals(listOf("BAT", "DIM", "OFF", "ON", "MAG"), order)
-        assertTrue("BAT must fire the plugs", IgnitionMode.BAT.ignites)
-        assertTrue("MAG must fire the plugs", IgnitionMode.MAG.ignites)
-        for (m in listOf(IgnitionMode.DIM, IgnitionMode.OFF, IgnitionMode.ON)) {
-            assertTrue("${m.label} is a lighting position, not an ignition one", !m.ignites)
+        assertEquals(listOf("GRID", "GEN", "OFF", "EMG"), order)
+        for (m in listOf(IgnitionMode.GRID, IgnitionMode.GEN, IgnitionMode.EMG)) {
+            assertTrue("${m.label} must feed the plugs", m.ignites)
         }
-        // The key cannot jump: BAT to MAG is four notches through three dead ones.
-        var k = IgnitionMode.BAT
+        assertTrue("OFF is dead", !IgnitionMode.OFF.ignites)
+        // The selector cannot jump: EMG to GEN passes through OFF.
+        var k = IgnitionMode.EMG
         var notches = 0
-        while (k != IgnitionMode.MAG) { k = k.clockwise(); notches++ }
-        assertEquals(4, notches)
+        while (k != IgnitionMode.GEN) { k = k.anticlockwise(); notches++ }
+        assertEquals(2, notches)
     }
 
     @Test
-    fun magnetoGivesNoSparkAtRestButFiresWhenTurning() {
+    fun theExciterGivesNothingAtRestButFiresWhenTurning() {
         val p = Plant(1)
-        p.ctl.ignition = IgnitionMode.MAG
-        assertTrue("magneto must be dead at rest", p.engine.sparkEnergy(p.ctl, 0.0) < 0.02)
-        assertTrue("magneto must be weak at cranking speed", p.engine.sparkEnergy(p.ctl, 90.0) < 0.35)
-        assertTrue("magneto must be strong at speed", p.engine.sparkEnergy(p.ctl, 600.0) > 0.9)
+        p.ctl.ignition = IgnitionMode.GEN
+        assertTrue("the exciter must be dead at rest", p.engine.sparkEnergy(p.ctl, 0.0) < 0.02)
+        assertTrue("still weak at cranking speed", p.engine.sparkEnergy(p.ctl, 90.0) < 0.35)
+        assertTrue("strong once up to speed", p.engine.sparkEnergy(p.ctl, 600.0) > 0.9)
     }
 
     @Test
-    fun batteryIsStrongAtCrankingAndFadesAtSpeed() {
+    fun stationServiceIsSteadyWhileTheBusIsHealthy() {
+        val p = Plant(1)
+        p.ctl.ignition = IgnitionMode.GRID
+        p.engine.busSupplyPu = 1.0
+        assertTrue("GRID must fire even at rest", p.engine.sparkEnergy(p.ctl, 0.0) > 0.9)
+        assertTrue("and at working speed", p.engine.sparkEnergy(p.ctl, 600.0) > 0.9)
+    }
+
+    @Test
+    fun aSaggingBusWeakensTheStationServiceSpark() {
+        val engine = Engine()
+        val ctl = Controls()
+        ctl.ignition = IgnitionMode.GRID
+
+        var previous = 1.1
+        for (pu in listOf(1.00, 0.90, 0.82, 0.75, 0.68, 0.62)) {
+            engine.busSupplyPu = pu
+            val e = engine.sparkEnergy(ctl, 600.0)
+            assertTrue("spark must not strengthen as the bus falls: $pu gave $e", e < previous + 1e-9)
+            previous = e
+        }
+        engine.busSupplyPu = 0.62
+        assertTrue("at the bottom there is nothing left", engine.sparkEnergy(ctl, 600.0) < 0.02)
+    }
+
+    @Test
+    fun anEngineOnStationServiceDiesWhenTheBusGoes() {
+        // Run the engine directly so the bus supply can be taken away outright.
+        val engine = Engine()
+        val ctl = Controls()
+        ctl.ignition = IgnitionMode.GRID
+        ctl.throttle = 0.5
+        ctl.mixture = 0.625
+        ctl.sparkLever = 0.72
+        ctl.oilerRate = 0.8
+        engine.jacketTempC = 78.0
+        engine.busSupplyPu = 1.0
+
+        repeat(240) { engine.step(1.0 / 60.0, ctl, 600.0) }
+        assertTrue("should be firing on station service, was ${engine.firingSuccess}", engine.firingSuccess > 0.7)
+
+        engine.busSupplyPu = 0.0
+        repeat(120) { engine.step(1.0 / 60.0, ctl, 600.0) }
+        assertTrue("with the bus gone there is no ignition left", engine.firingSuccess < 0.05)
+    }
+
+    @Test
+    fun theBatteryIsStrongAtCrankingAndFadesAtSpeed() {
         val p = Plant(2)
-        p.ctl.ignition = IgnitionMode.BAT
-        assertTrue("battery must fire at cranking speed", p.engine.sparkEnergy(p.ctl, 90.0) > 0.9)
+        p.ctl.ignition = IgnitionMode.EMG
+        assertTrue("the battery must fire at cranking speed", p.engine.sparkEnergy(p.ctl, 90.0) > 0.9)
         assertTrue(
-            "battery coil must fade at working speed",
+            "and must fade at working speed",
             p.engine.sparkEnergy(p.ctl, 600.0) < p.engine.sparkEnergy(p.ctl, 90.0) * 0.85
         )
     }
 
     @Test
-    fun lightingPositionsGiveNoSparkAtAll() {
+    fun theOffPositionGivesNoSparkAtAll() {
         val p = Plant(2)
-        for (m in listOf(IgnitionMode.DIM, IgnitionMode.OFF, IgnitionMode.ON)) {
-            p.ctl.ignition = m
-            assertEquals("${m.label} must give no spark", 0.0, p.engine.sparkEnergy(p.ctl, 600.0), 1e-9)
-        }
+        p.ctl.ignition = IgnitionMode.OFF
+        assertEquals("OFF must give no spark", 0.0, p.engine.sparkEnergy(p.ctl, 600.0), 1e-9)
+        assertEquals(0.0, p.engine.sparkEnergy(p.ctl, 90.0), 1e-9)
     }
 
     @Test
     fun dawdlingAcrossTheDeadPositionsKillsTheEngine() {
-        // Both machines start on BAT and must cross DIM, OFF and ON to reach MAG.
+        // Both machines start on EMG and must cross OFF to reach GEN.
         val fast = Plant(21)
         assertTrue(startEngine(fast))
-        sweepKeyTo(fast, IgnitionMode.BAT, 0.2)
+        sweepKeyTo(fast, IgnitionMode.EMG, 0.2)
         run(fast, 6.0) { trim(it) }
-        assertTrue("should still be alive back on BAT", fast.running)
-        sweepKeyTo(fast, IgnitionMode.MAG, 0.25)
+        assertTrue("should still be alive back on EMG", fast.running)
+        sweepKeyTo(fast, IgnitionMode.GEN, 0.25)
         run(fast, 6.0) { trim(it) }
-        assertTrue("a brisk sweep to MAG should keep it running, rpm ${fast.rpm}", fast.running)
+        assertTrue("a brisk sweep to GEN should keep it running, rpm ${fast.rpm}", fast.running)
 
         val slow = Plant(21)
         assertTrue(startEngine(slow))
-        sweepKeyTo(slow, IgnitionMode.BAT, 0.2)
+        sweepKeyTo(slow, IgnitionMode.EMG, 0.2)
         run(slow, 6.0) { trim(it) }
         slow.ctl.throttle = 0.25
-        sweepKeyTo(slow, IgnitionMode.MAG, 8.0)   // three dead positions, eight seconds each
+        sweepKeyTo(slow, IgnitionMode.GEN, 30.0)  // dawdling across the dead notch
         assertTrue(
             "dawdling must cost real speed: ${slow.rpm} against ${fast.rpm}",
             slow.rpm < fast.rpm - 120.0
         )
 
-        // Dawdle long enough and it coasts below magneto speed, so landing on
-        // MAG cannot relight it and the only way back is the battery.
+        // Dawdle long enough and it coasts below the speed the exciter needs, so
+        // landing on GEN cannot relight it and the only way back is the battery.
         val stalled = Plant(21)
         assertTrue(startEngine(stalled))
-        sweepKeyTo(stalled, IgnitionMode.BAT, 0.2)
+        sweepKeyTo(stalled, IgnitionMode.EMG, 0.2)
         run(stalled, 6.0) { trim(it) }
         stalled.ctl.throttle = 0.0
-        sweepKeyTo(stalled, IgnitionMode.MAG, 40.0)
+        sweepKeyTo(stalled, IgnitionMode.GEN, 70.0)
         run(stalled, 20.0)
         assertTrue("the engine must be dead, rpm ${stalled.rpm}", !stalled.running)
     }
@@ -186,7 +233,7 @@ class SimTest {
         p.ctl.mixture = 0.88
         p.ctl.throttle = 0.3
         p.ctl.sparkLever = 1.0          // fully advanced, the classic mistake
-        p.ctl.ignition = IgnitionMode.BAT
+        p.ctl.ignition = IgnitionMode.EMG
         p.prime()
         var guard = 0
         while (!p.ended && guard++ < 4000) {
