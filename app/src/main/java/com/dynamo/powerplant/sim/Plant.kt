@@ -96,6 +96,9 @@ class Plant(seed: Long = System.nanoTime()) {
 
     /** Brightness 0..1 of the three synchronising lamps, dark-lamp connection. */
     fun lampBrightness(): Double {
+        // The lamps hang across the open breaker contacts. Close it and they are
+        // short circuited, so they go out and stay out.
+        if (ctl.mainBreakerClosed) return 0.0
         if (!ctl.fieldSwitchClosed) return 0.0
         val vg = gen.emf(rpm)
         val vb = grid.busVolts
