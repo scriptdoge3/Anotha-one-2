@@ -40,6 +40,7 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
     private var crankEffort = 0f
     private var crankLastAngle = 0f
     private var crankAccum = 0f
+    private var crankLastTrigger = 0L
 
     private var keyLastMove = 0L
     private val pressed = HashSet<String>()
@@ -177,6 +178,7 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
         if (l.crankHandle.near(x, y, l.crankR * 1.6f)) {
             crankLastAngle = atan2(y - l.crankHandle.y, x - l.crankHandle.x)
             crankAccum = 0f
+            crankLastTrigger = 0L
             grabs[id] = Grab("crank", x, y, 0.0)
             return
         }
@@ -248,11 +250,18 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
         val now = System.currentTimeMillis()
         if (now - keyLastMove < 55L) return
         val a = Math.toDegrees(atan2((y - l.keySwitch.y).toDouble(), (x - l.keySwitch.x).toDouble()))
-        val spread = 150.0
-        val start = 180.0 + (180.0 - spread) / 2.0
-        var deg = a
-        if (deg < 0) deg += 360.0
-        val t = ((deg - start) / spread).coerceIn(0.0, 1.0)
+        val spread = 200.0
+        val start = 180.0 - (spread - 180.0) / 2.0
+        // Measure round from the BAT end. Anything outside the arc belongs to
+        // whichever end it is nearer, so dragging past a stop does not wrap the
+        // key round to the opposite position.
+        var rel = (a - start) % 360.0
+        if (rel < 0) rel += 360.0
+        val t = when {
+            rel <= spread -> rel / spread
+            rel < spread + (360.0 - spread) / 2.0 -> 1.0
+            else -> 0.0
+        }
         val want = Math.round(t * (IgnitionMode.entries.size - 1)).toInt()
         val cur = plant.ctl.ignition.ordinal
         if (want == cur) return
@@ -271,9 +280,15 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
         // Only turning it the right way does any good.
         if (d > 0) {
             crankAccum += d
-            if (crankAccum > 0.55f) {
-                val strength = (crankAccum / 1.6f).coerceIn(0.35f, 1.0f)
-                plant.crank(strength.toDouble())
+            if (crankAccum > 0.45f) {
+                // How hard you are cranking is how fast you are turning the handle,
+                // not how far you have turned it.
+                val now = System.nanoTime()
+                val elapsed = if (crankLastTrigger == 0L) 0.25
+                else ((now - crankLastTrigger) / 1e9).coerceIn(0.02, 1.0)
+                crankLastTrigger = now
+                val radPerSec = crankAccum / elapsed
+                plant.crank((radPerSec / 7.0).coerceIn(0.30, 1.0))
                 crankEffort = 1f
                 crankAccum = 0f
             }
