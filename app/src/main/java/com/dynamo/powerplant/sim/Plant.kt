@@ -96,7 +96,6 @@ class Plant(seed: Long = System.nanoTime()) {
         // The lamps hang across the open breaker contacts. Close it and they are
         // short circuited, so they go out and stay out.
         if (ctl.mainBreakerClosed) return 0.0
-        if (!ctl.fieldSwitchClosed) return 0.0
         val vg = gen.emf(rpm)
         val vb = grid.volts
         // Voltage across the lamp is the vector difference of the two systems.
@@ -162,7 +161,7 @@ class Plant(seed: Long = System.nanoTime()) {
         rpm = max(0.0, rpm + deltaRpm)
     }
 
-    /** Throw one of the internal supply switches on the board. */
+    /** Throw one of the emergency line switches on the board. */
     fun toggleAux(i: Int) {
         if (ended) return
         val l = service.loads[i]
@@ -198,9 +197,10 @@ class Plant(seed: Long = System.nanoTime()) {
     private fun integrate(dt: Double) {
         val omega = rpm * PI / 30.0
 
-        // Work out the internal supply before anything else, because the ignition,
-        // the cooling water pump and the charging set all hang off it.
+        // Work out the emergency line before anything else, because the ignition,
+        // the field and the cooling water pumps all hang off it.
         engine.busSupplyPu = grid.volts / Spec.RATED_VOLTS
+        engine.genTerminalPu = gen.emf(rpm) / Spec.RATED_VOLTS
         val strength = engine.sourceStrength(ctl, rpm)
         val capacity = when (ctl.ignition) {
             IgnitionMode.GRID -> Service.CAPACITY_GRID_KW
@@ -213,9 +213,7 @@ class Plant(seed: Long = System.nanoTime()) {
         engine.serviceVolts = service.volts
         engine.ignitionLive = service.isRunning(Service.IGNITION)
         engine.waterPumpRunning = service.isRunning(Service.PUMP)
-        engine.chargerRunning = service.isRunning(Service.CHARGER)
         engine.serviceDrawKw = service.demandKw
-        engine.mainTransformerLive = mainTransformerLive()
 
         // ---- prime movers -------------------------------------------------------
         var torque = engine.step(dt, ctl, rpm)
@@ -224,7 +222,7 @@ class Plant(seed: Long = System.nanoTime()) {
         if (engine.backfiredThisStep) events.backfired = true
 
         // ---- electrical ---------------------------------------------------------
-        gen.stepField(dt, ctl, rpm)
+        gen.stepField(dt, ctl, rpm, fieldSupplyPu())
         val elecTorque = gen.stepElectrical(dt, ctl, rpm, grid)
         if (gen.poleSlipThisStep) {
             events.poleSlip = true
@@ -307,6 +305,14 @@ class Plant(seed: Long = System.nanoTime()) {
             (ctl.mainBreakerClosed && grid.volts > Spec.RATED_VOLTS * 0.45)
 
     /**
+     * Volts available to the field, per unit. The field hangs off the emergency
+     * line like everything else, so pulling that switch — or letting the line
+     * collapse — takes the excitation with it.
+     */
+    fun fieldSupplyPu(): Double =
+        if (service.isRunning(Service.EXCITATION)) clamp(service.volts, 0.0, 1.0) else 0.0
+
+    /**
      * How brightly the panel lamps burn, which depends on whether the source the
      * selector is pointing at is actually alive.
      */
@@ -337,9 +343,9 @@ class Plant(seed: Long = System.nanoTime()) {
         ctl.throttle = 0.45; ctl.sparkLever = 0.30; ctl.mixture = 0.80; ctl.excitation = 0.0
         ctl.compressionRelease = false; ctl.primerCharges = 0
         ctl.waterValve = 0.35; ctl.oilerRate = 0.45
-        ctl.mainBreakerClosed = false; ctl.fieldSwitchClosed = true
-        ctl.emergencyBreakerClosed = true
+        ctl.mainBreakerClosed = false
+        ctl.emgTxBreakerClosed = true; ctl.batteryBreakerClosed = true
         ctl.auxClosed[0] = true; ctl.auxClosed[1] = true
-        ctl.auxClosed[2] = false; ctl.auxClosed[3] = false
+        ctl.auxClosed[2] = true; ctl.auxClosed[3] = false
     }
 }

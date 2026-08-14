@@ -144,8 +144,8 @@ class Layout(val w: Float, val h: Float) {
     )
 
     /**
-     * The knife switches along the board: the emergency breaker, the field
-     * switch, and then the four internal supplies.
+     * The knife switches along the board: the emergency transformer breaker, the
+     * battery breaker, and then the four loads on the emergency line.
      */
     private val switchRow: List<RectF> = run {
         val left = mainBreaker.right + w * 0.018f
@@ -156,10 +156,13 @@ class Layout(val w: Float, val h: Float) {
         }
     }
 
-    val emergencyBreaker: RectF = switchRow[0]
-    val fieldSwitch: RectF = switchRow[1]
+    /** Generator to the emergency transformer, the road the charge takes. */
+    val emgTxBreaker: RectF = switchRow[0]
 
-    /** The four internal supply switches on the board. */
+    /** Battery out to the emergency line. */
+    val batteryBreaker: RectF = switchRow[1]
+
+    /** The four emergency line switches on the board. */
     val auxSwitches: List<RectF> = switchRow.subList(2, 6)
 
     // ---------------------------------------------------------------- annunciator

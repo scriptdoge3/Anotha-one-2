@@ -154,9 +154,13 @@ class ControlsTouchTest {
         val p = view.plant
         showTab(Tab.ELECTRICAL)
 
-        val fieldBefore = p.ctl.fieldSwitchClosed
-        tap(L.fieldSwitch.centerX(), L.fieldSwitch.centerY())
-        assertNotEquals("the field switch must throw", fieldBefore, p.ctl.fieldSwitchClosed)
+        val emgTxBefore = p.ctl.emgTxBreakerClosed
+        tap(L.emgTxBreaker.centerX(), L.emgTxBreaker.centerY())
+        assertNotEquals("the emergency transformer breaker must throw", emgTxBefore, p.ctl.emgTxBreakerClosed)
+
+        val battBefore = p.ctl.batteryBreakerClosed
+        tap(L.batteryBreaker.centerX(), L.batteryBreaker.centerY())
+        assertNotEquals("the battery breaker must throw", battBefore, p.ctl.batteryBreakerClosed)
 
         for (i in L.auxSwitches.indices) {
             val before = p.ctl.auxClosed[i]

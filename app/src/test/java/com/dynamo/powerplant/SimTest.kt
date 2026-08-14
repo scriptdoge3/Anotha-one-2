@@ -423,28 +423,24 @@ class SimTest {
     }
 
     @Test
-    fun theEmergencyBreakerIsTheRoadBackToTheCells() {
+    fun theEmergencyTransformerIsTheRoadBackToTheCells() {
         val p = Plant(91)
         assertTrue(startEngine(p))
-        // Bring the field up so the machine actually makes volts; with no
-        // excitation the output of the main transformer is dead and there is
-        // nothing to charge from.
+        // Bring the field up so the machine actually makes volts. The emergency
+        // transformer hangs straight off the generator terminals, so an
+        // unexcited machine has nothing to give it.
         p.ctl.excitation = 0.60
         run(p, 8.0) { tend(it) }
-        assertTrue("the transformer output should be alive", p.mainTransformerLive())
 
-        // Running on the machine with the charging set switched in, the cells
-        // should be going back up through the emergency breaker.
-        p.ctl.auxClosed[Service.CHARGER] = true
         p.engine.batteryCharge = 0.50
         run(p, 5.0) { tend(it) }
-        assertTrue("the charging set should be working", p.engine.batteryChargingNow)
+        assertTrue("the emergency transformer should be charging", p.engine.batteryChargingNow)
         val rising = p.engine.batteryCharge
         run(p, 20.0) { tend(it) }
         assertTrue("and the cells should be coming up", p.engine.batteryCharge > rising)
 
-        // Open the emergency breaker and that road is cut, whatever the board says.
-        p.ctl.emergencyBreakerClosed = false
+        // Open the emergency transformer breaker and that road is cut.
+        p.ctl.emgTxBreakerClosed = false
         run(p, 5.0) { tend(it) }
         assertTrue("with the breaker open nothing can charge", !p.engine.batteryChargingNow)
         val held = p.engine.batteryCharge
@@ -453,16 +449,52 @@ class SimTest {
     }
 
     @Test
-    fun theTransformerOutputMustBeAliveToCharge() {
+    fun theMachineMustBeExcitedToCharge() {
         val p = Plant(92)
-        // Stone cold, nothing turning and the unit breaker open: the output of
-        // the main transformer is dead, so there is nothing to charge from.
+        // Stone cold and nothing turning: the generator terminals are dead, so
+        // the emergency transformer has nothing to work on however the board is
+        // set.
         p.ctl.ignition = IgnitionMode.GRID
-        p.ctl.auxClosed[Service.CHARGER] = true
         p.engine.batteryCharge = 0.50
         run(p, 4.0)
-        assertTrue("a dead transformer output cannot charge", !p.engine.batteryChargingNow)
-        assertTrue("and the output should read dead", !p.mainTransformerLive())
+        assertTrue("dead terminals cannot charge", !p.engine.batteryChargingNow)
+        val held = p.engine.batteryCharge
+        run(p, 10.0)
+        assertTrue("and the cells must not rise", p.engine.batteryCharge <= held + 1e-6)
+    }
+
+    @Test
+    fun theBatteryBreakerTakesTheCellsOffTheLine() {
+        val p = Plant(93)
+        p.ctl.ignition = IgnitionMode.EMG
+        run(p, 1.0)
+        assertTrue("on emergency supply the line should be alive", p.service.volts > 0.8)
+
+        p.ctl.batteryBreakerClosed = false
+        run(p, 1.0)
+        assertTrue("with the battery breaker open the line is dead", p.service.volts < 0.05)
+        assertEquals("and there is no spark", 0.0, p.engine.sparkEnergy(p.ctl, 0.0), 1e-9)
+
+        // Nor will the starting motor turn: it hangs off the same breaker.
+        p.engine.starterEngaged = true
+        run(p, 2.0)
+        assertTrue("and the starter must not turn", !p.engine.starterCranking && p.rpm < 5.0)
+    }
+
+    @Test
+    fun theFieldHangsOffTheEmergencyLine() {
+        val p = Plant(94)
+        assertTrue(startEngine(p))
+        p.ctl.excitation = 0.60
+        run(p, 8.0) { tend(it) }
+        assertTrue("the machine should be making volts", p.genVolts > Spec.RATED_VOLTS * 0.5)
+
+        // Pull the excitation switch out on the board and the field collapses,
+        // rheostat or no rheostat.
+        p.toggleAux(Service.EXCITATION)
+        run(p, 6.0) { tend(it) }
+        assertTrue("the field must collapse, flux was ${p.gen.fieldFlux}", p.gen.fieldFlux < 0.05)
+        assertTrue("and the volts with it", p.genVolts < Spec.RATED_VOLTS * 0.10)
     }
 
     @Test
@@ -489,11 +521,11 @@ class SimTest {
     // ------------------------------------------------------------------ station service
 
     @Test
-    fun theIgnitionIsFedFromTheInternalBus() {
+    fun theIgnitionIsFedFromTheEmergencyLine() {
         val p = Plant(51)
         p.ctl.ignition = IgnitionMode.GRID
         run(p, 1.0)
-        assertTrue("ignition should be alive on station service", p.engine.sparkEnergy(p.ctl, 0.0) > 0.8)
+        assertTrue("ignition should be alive on the line", p.engine.sparkEnergy(p.ctl, 0.0) > 0.8)
 
         // Pull the ignition switch out on the board and the plugs go dead.
         p.toggleAux(Service.IGNITION)
@@ -506,17 +538,15 @@ class SimTest {
         val p = Plant(52)
         p.ctl.ignition = IgnitionMode.EMG
         // Everything switched in at once is more than the cells will carry.
-        p.ctl.auxClosed[Service.CHARGER] = true
         p.ctl.auxClosed[Service.LIGHTS] = true
         run(p, 2.0)
-        assertTrue("the internal bus should be overloaded", p.service.overloaded)
+        assertTrue("the emergency line should be overloaded", p.service.overloaded)
         assertTrue("and its volts should have sagged, was ${p.service.volts}", p.service.volts < 0.90)
 
-        // Shed the charger and the lights and it comes back up.
-        p.ctl.auxClosed[Service.CHARGER] = false
+        // Shed the lights and it comes back up.
         p.ctl.auxClosed[Service.LIGHTS] = false
         run(p, 2.0)
-        assertTrue("shedding load must restore the bus", !p.service.overloaded)
+        assertTrue("shedding load must restore the line", !p.service.overloaded)
         assertTrue("volts back up, was ${p.service.volts}", p.service.volts > 0.9)
     }
 

@@ -36,17 +36,16 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     var busSupplyPu: Double = 1.0
 
     /**
-     * Volts on the station service bus, per unit, and whether the ignition and
-     * the cooling water pump are actually switched in and running. All three are
-     * set by the Plant from the switchboard each step.
+     * Volts on the emergency line, per unit, and whether the ignition and the
+     * emergency pumps are actually switched in and running. All three are set by
+     * the Plant from the switchboard each step.
      */
     var serviceVolts: Double = 0.0
     var ignitionLive: Boolean = true
     var waterPumpRunning: Boolean = false
-    var chargerRunning: Boolean = false
-    /** True when the output of the main transformer has volts on it. */
-    var mainTransformerLive: Boolean = false
-    /** Kilowatts the internal bus is drawing, for the battery drain. */
+    /** Generator terminal volts, per unit: what the emergency transformer sees. */
+    var genTerminalPu: Double = 0.0
+    /** Kilowatts the emergency line is drawing, for the battery drain. */
     var serviceDrawKw: Double = 0.0
 
     // --- starter ---
@@ -70,9 +69,9 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     val ambientC = 8.0
 
     /**
-     * Spark energy 0..1 at the plug. The coils are fed from the station service
-     * bus, so the selector chooses the source and the switchboard decides whether
-     * the ignition is switched in and whether the bus is holding its volts.
+     * Spark energy 0..1 at the plug. The coils are fed from the emergency line,
+     * so the selector chooses the source and the switchboard decides whether the
+     * ignition is switched in and whether the line is holding its volts.
      */
     fun sparkEnergy(ctl: Controls, rpm: Double): Double {
         if (!ignitionLive) return 0.0
@@ -87,25 +86,28 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     fun coilDwellFade(rpm: Double): Double =
         clamp(1.0 - max(0.0, rpm - 430.0) / 620.0, 0.0, 1.0)
 
-    /** What the selected source is worth right now, before the internal bus. */
+    /** What the selected source is worth right now, at the emergency line. */
     fun sourceStrength(ctl: Controls, rpm: Double): Double = when (ctl.ignition) {
         IgnitionMode.GRID -> gridSupply()
         IgnitionMode.GEN -> generatorSupply(rpm)
-        IgnitionMode.EMG -> emergencySupply(rpm)
+        // The cells only reach the line through the battery breaker.
+        IgnitionMode.EMG -> if (ctl.batteryBreakerClosed) emergencySupply(rpm) else 0.0
         IgnitionMode.OFF -> 0.0
     }
 
     /**
-     * Station service off the town bus. Full and steady whatever the engine is
-     * doing, so long as the bus is healthy. It fades as the bus volts sag, which
-     * is the trap: the ignition goes weak exactly when the system is in trouble
-     * and you most need the engine.
+     * Off the grid bus, down through the starting transformer. Full and steady
+     * whatever the engine is doing, so long as the bus is healthy. It fades as
+     * the bus volts sag, which is the trap: the ignition goes weak exactly when
+     * the system is in trouble and you most need the engine.
      */
     fun gridSupply(): Double = clamp((busSupplyPu - 0.62) / 0.33, 0.0, 1.0)
 
     /**
-     * The shaft-driven exciter set. Dead at rest, strengthening with speed, which
-     * is why it cannot start the engine but is the right place to run it.
+     * The shaft-driven auxiliary set. Dead at rest, strengthening with speed,
+     * which is why it cannot start the engine but is the right place to run it.
+     * It needs no field of its own, which is what breaks the circle: the line it
+     * feeds is the line the main field hangs off.
      */
     fun generatorSupply(rpm: Double): Double {
         val t = clamp((rpm - 55.0) / 165.0, 0.0, 1.0)
@@ -221,10 +223,11 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         if (jacketTempC > 100.0) torque *= clamp(1.0 - (jacketTempC - 100.0) / 55.0, 0.25, 1.0)
 
         // ---- starting motor -----------------------------------------------------
-        // Wired through the emergency battery only, so EMG is the one position
-        // that will turn the engine over.
+        // Wired straight off the battery, so EMG is the one position that will
+        // turn the engine over, and only with the battery breaker made.
         starterCranking = starterEngaged &&
             ctl.ignition == IgnitionMode.EMG &&
+            ctl.batteryBreakerClosed &&
             batteryCharge > 0.04 &&
             rpm < Spec.STARTER_STALL_RPM
         if (starterCranking) {
@@ -237,21 +240,19 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         }
 
         // ---- battery housekeeping ----------------------------------------------
-        // Only the emergency position draws on the cells; the other two are fed
-        // from the bus or from the machine itself.
-        if (ctl.ignition == IgnitionMode.EMG) {
-            // Everything switched onto the bus is coming out of the cells.
+        // Only the emergency position draws on the cells; the other two hold the
+        // line up themselves and leave the battery alone.
+        if (ctl.ignition == IgnitionMode.EMG && ctl.batteryBreakerClosed) {
+            // Everything switched onto the line is coming out of the cells.
             batteryCharge = max(0.0, batteryCharge - dt * 0.0016 * (1.0 + serviceDrawKw * 0.28))
         }
-        // The charging set is a switched load on the internal bus. It cannot put
-        // anything back while the bus is being fed by the battery itself, nor
-        // with the emergency breaker open, because that is the road the charge
-        // takes back to the output of the main transformer.
-        val canCharge = chargerRunning && ctl.ignition != IgnitionMode.EMG &&
-            ctl.emergencyBreakerClosed && mainTransformerLive
+        // Charge comes back the one way it can: off the generator terminals,
+        // through the emergency transformer breaker and into the cells. No
+        // excited machine or an open breaker and there is nothing putting back.
+        val canCharge = ctl.emgTxBreakerClosed && genTerminalPu > 0.35
         batteryChargingNow = canCharge && batteryCharge < 0.999
         if (batteryChargingNow) {
-            batteryCharge = min(1.0, batteryCharge + dt * 0.013 * clamp(serviceVolts, 0.0, 1.0))
+            batteryCharge = min(1.0, batteryCharge + dt * 0.013 * clamp(genTerminalPu, 0.0, 1.0))
         }
 
         // ---- flooding -----------------------------------------------------------
@@ -351,7 +352,7 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         batteryCharge = 1.0; plugFouling = 0.0; floodLevel = 0.0; firingSuccess = 0.0
         busSupplyPu = 1.0
         serviceVolts = 0.0; ignitionLive = true; waterPumpRunning = false
-        chargerRunning = false; mainTransformerLive = false; serviceDrawKw = 0.0
+        genTerminalPu = 0.0; serviceDrawKw = 0.0
         knockIndex = 0.0; knockDamage = 0.0; bearingWear = 0.0
         starterEngaged = false; starterCranking = false; starterHeat = 0.0
         batteryChargingNow = false

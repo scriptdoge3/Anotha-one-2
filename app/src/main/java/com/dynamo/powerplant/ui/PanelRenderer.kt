@@ -11,6 +11,7 @@ import android.graphics.Shader
 import com.dynamo.powerplant.sim.Grid
 import com.dynamo.powerplant.sim.IgnitionMode
 import com.dynamo.powerplant.sim.Plant
+import com.dynamo.powerplant.sim.Service
 import com.dynamo.powerplant.sim.Spec
 import kotlin.math.abs
 import kotlin.math.max
@@ -453,13 +454,14 @@ class PanelRenderer(val L: Layout) {
             p.genVolts > Spec.RATED_VOLTS * 0.5
         )
         Widgets.knifeSwitch(
-            c, L.emergencyBreaker, if (p.ctl.emergencyBreakerClosed) 1f else 0f, "EMG BKR",
+            c, L.emgTxBreaker, if (p.ctl.emgTxBreakerClosed) 1f else 0f, "EMG TX",
             if (p.engine.batteryChargingNow) "CHARGING" else "", ambient,
-            live = p.ctl.emergencyBreakerClosed && p.mainTransformerLive()
+            live = p.engine.batteryChargingNow
         )
         Widgets.knifeSwitch(
-            c, L.fieldSwitch, if (p.ctl.fieldSwitchClosed) 1f else 0f, "FIELD", "", ambient,
-            live = p.gen.fieldFlux > 0.05
+            c, L.batteryBreaker, if (p.ctl.batteryBreakerClosed) 1f else 0f, "BATTERY",
+            "%.0f%%".format(p.engine.batteryCharge * 100.0), ambient,
+            live = p.ctl.batteryBreakerClosed && p.engine.batteryCharge > 0.02
         )
         for (i in L.auxSwitches.indices) {
             val l = p.service.loads[i]
@@ -480,7 +482,7 @@ class PanelRenderer(val L: Layout) {
             if (e.jacketTempC > 112) flash else if (e.jacketTempC > 98) 0.55f else 0f,
             if (e.knockIndex > 0.45) flash else if (e.knockIndex > 0.22) 0.55f else 0f,
             if (p.outputKw < -4.0) flash else 0f,
-            if (!p.ctl.fieldSwitchClosed || p.gen.fieldFlux < 0.04) 0.65f else 0f,
+            if (!p.service.isRunning(Service.EXCITATION) || p.gen.fieldFlux < 0.04) 0.65f else 0f,
             if (p.service.loads.any { it.fuseBlown } || p.service.overloaded) flash else 0f,
             if (e.batteryCharge < 0.12) flash else if (e.batteryCharge < 0.30) 0.55f else 0f
         )

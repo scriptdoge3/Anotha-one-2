@@ -6,7 +6,11 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * The alternator and its belt-driven exciter.
+ * The alternator and its field.
+ *
+ * The field is fed from the emergency line, along with the ignition, so the two
+ * things the set cannot run without hang off the same switchboard. Lose that
+ * line and the machine loses its excitation with everything else.
  *
  * Off the bus, terminal volts are simply the open-circuit EMF and the machine
  * costs the engine almost nothing. On the bus, the classic power-angle model
@@ -51,11 +55,15 @@ class Generator {
         return (fieldSaturation(fieldFlux) + residual) * speed * Spec.RATED_VOLTS
     }
 
-    fun stepField(dt: Double, ctl: Controls, rpm: Double) {
-        val target = if (ctl.fieldSwitchClosed) clamp(ctl.excitation, 0.0, 1.0) else 0.0
-        // The exciter itself needs speed before the field will build at all.
-        val buildRate = 1.0 / (0.85 + 1.4 * clamp(1.0 - rpm / Spec.RATED_RPM, 0.0, 1.0))
-        fieldFlux += (target - fieldFlux) * clamp(dt * buildRate * 1.6, 0.0, 1.0)
+    /**
+     * @param supplyPu volts on the emergency line feeding the field, 0 if the
+     *   excitation switch is out or the line is dead. The rheostat can only ask
+     *   for what the line is actually holding up.
+     */
+    fun stepField(dt: Double, ctl: Controls, rpm: Double, supplyPu: Double) {
+        val target = clamp(ctl.excitation, 0.0, 1.0) * clamp(supplyPu, 0.0, 1.0)
+        // The field winding has real inductance, so it takes a moment either way.
+        fieldFlux += (target - fieldFlux) * clamp(dt * 1.15, 0.0, 1.0)
     }
 
     /**

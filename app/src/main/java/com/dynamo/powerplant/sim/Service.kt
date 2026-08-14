@@ -18,36 +18,39 @@ class ServiceLoad(
 }
 
 /**
- * The station service bus: the plant's own internal supply, and the whole point
- * of the switchboard. The ignition, the cooling water pump, the battery charger
- * and the house lighting all hang off it.
+ * The emergency line: the plant's own internal supply, and the whole point of
+ * the switchboard. The ignition, the excitation, the emergency pumps and the
+ * emergency lighting all hang off it, and every one of them is something the
+ * engine or the machine cannot do without.
  *
- * What feeds it is chosen on the supply selector, and each source can carry a
- * different amount. The battery in particular cannot run everything at once, so
- * on emergency supply you have to decide what matters.
+ * Normally it is held up by the battery, which the emergency transformer keeps
+ * charged off the generator terminals. What feeds it is chosen on the supply
+ * selector, and each source can carry a different amount. The battery in
+ * particular cannot run everything at once, so on emergency supply you have to
+ * decide what matters.
  */
 class Service {
 
     companion object {
-        /** What each source can deliver to the internal bus, in kilowatts. */
+        /** What each source can deliver to the emergency line, in kilowatts. */
         const val CAPACITY_GRID_KW = 60.0
         const val CAPACITY_GEN_KW = 60.0
         const val CAPACITY_BATTERY_KW = 18.0
 
         const val IGNITION = 0
-        const val PUMP = 1
-        const val CHARGER = 2
+        const val EXCITATION = 1
+        const val PUMP = 2
         const val LIGHTS = 3
     }
 
     val loads = listOf(
         ServiceLoad("IGNITION", "IGN", 0.60, 0.30),
-        ServiceLoad("WATER PUMP", "PUMP", 14.00, 0.55),
-        ServiceLoad("BATTERY CHARGER", "CHGR", 4.50, 0.60),
-        ServiceLoad("HOUSE LIGHTS", "LIGHT", 3.00, 0.25)
+        ServiceLoad("EXCITATION", "EXC", 2.20, 0.40),
+        ServiceLoad("EMERGENCY PUMPS", "PUMP", 14.00, 0.55),
+        ServiceLoad("EMERGENCY LIGHTS", "LIGHT", 3.00, 0.25)
     )
 
-    /** Volts on the internal bus, per unit. */
+    /** Volts on the emergency line, per unit. */
     var volts: Double = 0.0
         private set
     var demandKw: Double = 0.0
@@ -83,7 +86,7 @@ class Service {
         // can blow; the bus is simply dead.
         val ratio = if (capacityKw > 0.01) asked / capacityKw else 0.0
         overloaded = ratio > 1.0
-        val sag = if (ratio > 1.0) min(0.85, (ratio - 1.0) * 0.75) else 0.0
+        val sag = if (ratio > 1.0) min(0.85, (ratio - 1.0) * 1.60) else 0.0
         volts = clamp(sourceVolts * (1.0 - sag), 0.0, 1.15)
 
         // Each load runs only if the bus is holding up well enough for it.
