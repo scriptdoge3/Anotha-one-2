@@ -88,9 +88,12 @@ class SimTest {
         run(p, 6.0)
         p.engine.starterEngaged = false
 
-        // Bring the field up as soon as it will stand it: the main bus hangs off
-        // the station transformer, and until it is alive there is no circulating
-        // pump, no oil pump and nothing for the tie to carry.
+        // Open the starting transformer before touching the field: with it in,
+        // the terminals are already tied to the system through it, and exciting
+        // the machine parallels the set through a transformer that cannot hold
+        // it. Then bring the field up — the main bus hangs off the station
+        // transformer and there is no circulating pump until it is alive.
+        p.ctl.startingTxBreakerClosed = false
         p.ctl.excitation = 0.60
         run(p, 55.0) { tend(it) }
         sweepKeyTo(p, IgnitionMode.GEN, 0.25)   // a brisk sweep across the dead notch
@@ -116,11 +119,16 @@ class SimTest {
     }
 
     @Test
-    fun theGenTapGivesNothingUntilTheMachineIsExcited() {
+    fun theGenTapGivesNothingUntilSomethingHoldsTheTerminalsUp() {
         val p = Plant(1)
         p.ctl.ignition = IgnitionMode.GEN
-        // Stone cold: no volts on the terminals, so the emergency transformer
-        // has nothing to work on and the tap is dead.
+        // With the starting transformer in, the system holds the bar up and the
+        // tap works before the engine has turned at all.
+        run(p, 1.0)
+        assertTrue("back-fed, the tap is good", p.engine.sourceStrength(p.ctl, 0.0) > 0.9)
+
+        // Islanded and stone cold there is nothing behind it.
+        p.ctl.startingTxBreakerClosed = false
         run(p, 1.0)
         assertTrue("the tap must be dead at rest", p.engine.sourceStrength(p.ctl, 0.0) < 0.02)
 
@@ -128,18 +136,15 @@ class SimTest {
         assertTrue(startEngine(p))
         assertTrue("the tap should be alive", p.engine.sourceStrength(p.ctl, p.rpm) > 0.9)
 
-        // And it comes off the emergency transformer, not the main bus. Hold the
-        // line up from the grid so the field stays put, then open the emergency
-        // transformer breaker: the main bus does not notice, because it has its
-        // own transformer, but the tap is gone.
-        sweepKeyTo(p, IgnitionMode.GRID, 0.2)
+        // And it comes off the emergency transformer, not the main bus. Open
+        // that breaker and the tap is gone at once, while the main bus carries
+        // on as if nothing had happened — the two transformers are independent
+        // all the way back to the bar.
         p.ctl.emgTxBreakerClosed = false
-        run(p, 3.0) { tend(it) }
-        assertTrue("the main bus must be untouched, was ${p.mainBus.volts}", p.mainBus.volts > 0.9)
-        assertTrue("but the emergency transformer is out", p.emergencyTransformerPu() < 0.02)
-        p.ctl.ignition = IgnitionMode.GEN
-        run(p, 0.5)
+        run(p, 0.5) { tend(it) }
+        assertTrue("the emergency transformer is out", p.emergencyTransformerPu() < 0.02)
         assertTrue("so the tap gives nothing", p.engine.sourceStrength(p.ctl, p.rpm) < 0.02)
+        assertTrue("but the main bus must be untouched, was ${p.mainBus.volts}", p.mainBus.volts > 0.9)
     }
 
     @Test
@@ -444,13 +449,35 @@ class SimTest {
 
     @Test
     fun holdingTheStarterOnTheBatteryFlattensIt() {
-        // The water pump alone is 14 kW off the cells, so emergency supply is a
-        // clock: get it lit and get across to the machine.
+        // Islanded, the cells are all there is, and emergency supply is a clock:
+        // get it lit and get across to the machine.
         val p = Plant(78)
+        p.ctl.startingTxBreakerClosed = false
         p.ctl.ignition = IgnitionMode.EMG
         p.engine.starterEngaged = true
         run(p, 60.0)
         assertTrue("the cells must be well down, was ${p.engine.batteryCharge}", p.engine.batteryCharge < 0.25)
+    }
+
+    @Test
+    fun theBackFeedTakesTheClockOffTheStarter() {
+        // With the starting transformer in, the charging set is working the
+        // whole time you are cranking, so the cells hold up far better.
+        val islanded = Plant(79)
+        islanded.ctl.startingTxBreakerClosed = false
+        islanded.ctl.ignition = IgnitionMode.EMG
+        islanded.engine.starterEngaged = true
+        run(islanded, 40.0)
+
+        val backFed = Plant(79)
+        backFed.ctl.ignition = IgnitionMode.EMG
+        backFed.engine.starterEngaged = true
+        run(backFed, 40.0)
+
+        assertTrue(
+            "back-feeding must spare the cells: ${backFed.engine.batteryCharge} vs ${islanded.engine.batteryCharge}",
+            backFed.engine.batteryCharge > islanded.engine.batteryCharge + 0.05
+        )
     }
 
     @Test
@@ -480,18 +507,69 @@ class SimTest {
     }
 
     @Test
-    fun theMachineMustBeExcitedToCharge() {
+    fun theTerminalsMustBeLiveToCharge() {
         val p = Plant(92)
-        // Stone cold and nothing turning: the generator terminals are dead, so
-        // the emergency transformer has nothing to work on however the board is
-        // set.
-        p.ctl.ignition = IgnitionMode.GRID
+        // Islanded and stone cold: nothing on the terminals, so the emergency
+        // transformer has nothing to work on however the board is set.
+        p.ctl.startingTxBreakerClosed = false
+        p.ctl.ignition = IgnitionMode.EMG
         p.engine.batteryCharge = 0.50
         run(p, 4.0)
         assertTrue("dead terminals cannot charge", !p.engine.batteryChargingNow)
         val held = p.engine.batteryCharge
         run(p, 10.0)
         assertTrue("and the cells must not rise", p.engine.batteryCharge <= held + 1e-6)
+
+        // Close the starting transformer and the system back-feeds the bar, so
+        // the charging set comes alive with the engine still stone cold.
+        p.ctl.startingTxBreakerClosed = true
+        run(p, 4.0)
+        assertTrue("the back-feed must reach the charging set", p.engine.batteryChargingNow)
+        run(p, 30.0)
+        assertTrue("and put the cells back up", p.engine.batteryCharge > held + 0.005)
+    }
+
+    @Test
+    fun theStartingTransformerBringsADeadStationAlive() {
+        val p = Plant(93)
+        // Nothing turning, nothing excited, and the whole station alive anyway:
+        // the system is holding the terminals up through the starting transformer.
+        assertTrue("the terminals must be live from the system", p.generatorBusPu() > 0.9)
+        run(p, 3.0)
+        assertTrue("and the main bus with them", p.mainBus.volts > 0.9)
+        assertTrue("so the circulating pump can run before the engine does",
+            p.mainBus.isRunning(Service.CIRC_PUMP))
+        assertTrue("and the oil pump", p.mainBus.isRunning(Service.OIL_PUMP))
+
+        // Open its breaker and the station goes dark, because nothing else is
+        // holding anything up yet.
+        p.ctl.startingTxBreakerClosed = false
+        run(p, 3.0)
+        assertTrue("islanded and cold, the bar is dead", p.generatorBusPu() < 0.05)
+        assertTrue("and the main bus with it", p.mainBus.volts < 0.05)
+    }
+
+    @Test
+    fun excitingAgainstTheStartingTransformerThrowsItOff() {
+        val p = Plant(94)
+        // Start it but leave the starting transformer in, which is the mistake.
+        p.ctl.waterValve = 0.30; p.ctl.oilerRate = 0.55
+        p.ctl.mixture = 0.88; p.ctl.sparkLever = 0.30; p.ctl.throttle = 0.35
+        p.prime(); p.ctl.compressionRelease = true
+        p.ctl.ignition = IgnitionMode.EMG; p.engine.starterEngaged = true
+        run(p, 4.0); p.ctl.compressionRelease = false; run(p, 6.0)
+        p.engine.starterEngaged = false
+        run(p, 40.0) { tend(it) }
+        assertTrue("the engine should be turning", p.rpm > 300.0)
+        assertTrue("and the starting transformer still in", p.ctl.startingTxBreakerClosed)
+
+        // Now bring the field up against it.
+        p.ctl.excitation = 0.60
+        run(p, 40.0) { tend(it) }
+        assertTrue("the starting transformer must throw itself off", !p.ctl.startingTxBreakerClosed)
+        assertEquals("once", 1, p.startingTxTrips)
+        assertEquals("but it is not a wreck", Failure.NONE, p.failure)
+        assertTrue("and the machine is fine", p.running)
     }
 
     @Test

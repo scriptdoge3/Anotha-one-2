@@ -70,7 +70,9 @@ object Mimic {
 
         // ---- what is alive -----------------------------------------------------
         val gridLive = p.grid.volts > Spec.RATED_VOLTS * 0.45
-        val genLive = p.gen.emf(p.rpm) > Spec.RATED_VOLTS * 0.15
+        // The orange bar is live if the machine is making volts or the system is
+        // back-feeding it through the starting transformer.
+        val genLive = p.generatorBusPu() > 0.15
         val tied = p.ctl.mainBreakerClosed
         val txOutLive = p.mainTransformerLive()
         val emgTxClosed = p.ctl.emgTxBreakerClosed
@@ -116,8 +118,8 @@ object Mimic {
         // Everything the plant runs on comes off this bar, one way or another.
         val ac = level(Theme.AC_LIVE, Theme.AC_DEAD, genLive, ambient)
         run(c, ux, y(MAIN_TX_Y) + u * 1.3f, ux, y(GEN_BUS_Y), u * 0.62f, ac, genLive, phase, -0.4f, ambient)
-        bar(c, x(0.045f), x(0.900f), y(GEN_BUS_Y), u * 0.85f, ac, genLive, phase, 0.4f, ambient)
-        Theme.miniPlate(c, x(0.700f), y(GEN_BUS_Y) - u * 1.6f, "GENERATOR TERMINALS  2300 V", u * 0.56f, ambient)
+        bar(c, x(0.045f), x(0.965f), y(GEN_BUS_Y), u * 0.85f, ac, genLive, phase, 0.4f, ambient)
+        Theme.miniPlate(c, x(0.690f), y(GEN_BUS_Y) - u * 1.6f, "GENERATOR TERMINALS  2300 V", u * 0.56f, ambient)
 
         run(c, ux, y(GEN_BUS_Y), ux, y(GEN_Y) - u * 1.5f, u * 0.62f, ac, genLive, phase, -0.4f, ambient)
         machine(c, ux, y(GEN_Y), u * 1.5f, ac, ambient)
@@ -207,21 +209,30 @@ object Mimic {
         bar(c, x(0.040f), x(0.972f), y(LINE_Y), u * 0.85f, lineCol, lineLive, phase, 0.4f, ambient)
         Theme.miniPlate(c, x(0.640f), y(LINE_Y) + u * 1.7f, "EMERGENCY LINE", u * 0.60f, ambient)
 
-        // the grid's tap, down through the starting transformer
+        // The starting transformer: down off the system section of the high
+        // tension bar and onto the generator terminals. This is the back-feed
+        // road, the one that brings a dead station alive before the engine has
+        // turned a revolution.
         val sx = x(START_X)
         val startClosed = p.ctl.startingTxBreakerClosed
         run(c, sx, y(BUS_Y), sx, y(START_BKR_Y) - u * 0.95f, u * 0.62f, hv, gridLive, phase, 0.4f, ambient)
         device(c, sx, y(START_BKR_Y), u * 0.92f, startClosed, hv, ambient)
         Theme.miniPlate(c, sx - u * 5.4f, y(START_BKR_Y), "START TX BKR", u * 0.54f, ambient)
-        val startTapLive = gridLive && startClosed
-        val startFeed = level(Theme.HV_LIVE, Theme.HV_DEAD, startTapLive, ambient)
-        run(c, sx, y(START_BKR_Y) + u * 0.95f, sx, y(START_TX_Y) - u * 1.15f, u * 0.62f, startFeed, startTapLive, phase, 0.4f, ambient)
-        val startCol = level(Theme.AC_LIVE, Theme.AC_DEAD, gridService, ambient)
+        val backFeed = gridLive && startClosed
+        val startFeed = level(Theme.HV_LIVE, Theme.HV_DEAD, backFeed, ambient)
+        run(c, sx, y(START_BKR_Y) + u * 0.95f, sx, y(START_TX_Y) - u * 1.15f, u * 0.62f, startFeed, backFeed, phase, 0.4f, ambient)
+        val startCol = level(Theme.AC_LIVE, Theme.AC_DEAD, backFeed, ambient)
         transformer(c, sx, y(START_TX_Y), u * 1.15f, startCol, ambient)
         Theme.miniPlate(c, sx - u * 5.2f, y(START_TX_Y), "STARTING TX", u * 0.56f, ambient)
-        run(c, sx, y(START_TX_Y) + u * 1.15f, sx, y(LINE_Y) - u * 2.15f, u * 0.62f, startCol, gridService, phase, 0.4f, ambient)
-        tap(c, sx, y(LINE_Y) - u * 1.35f, u * 0.78f, gridService, startCol, ambient)
-        run(c, sx, y(LINE_Y) - u * 0.57f, sx, y(LINE_Y), u * 0.62f, startCol, gridService, phase, 0.4f, ambient)
+        // its secondary lands on the orange bar
+        run(c, sx, y(START_TX_Y) + u * 1.15f, sx, y(GEN_BUS_Y), u * 0.62f, startCol, backFeed, phase, 0.4f, ambient)
+        node(c, sx, y(GEN_BUS_Y), u * 0.42f, if (backFeed) startCol else ac)
+
+        // and the selector's own GRID contact comes off that same secondary
+        val gridCol = level(Theme.AC_LIVE, Theme.AC_DEAD, gridService, ambient)
+        run(c, sx, y(GEN_BUS_Y), sx, y(LINE_Y) - u * 2.15f, u * 0.62f, gridCol, gridService, phase, 0.4f, ambient)
+        tap(c, sx, y(LINE_Y) - u * 1.35f, u * 0.78f, gridService, gridCol, ambient)
+        run(c, sx, y(LINE_Y) - u * 0.57f, sx, y(LINE_Y), u * 0.62f, gridCol, gridService, phase, 0.4f, ambient)
 
         // The field circuit hangs off the line through its own switch, in series
         // with the excitation load switch on the board. The discharge resistor
@@ -405,6 +416,11 @@ object Mimic {
             )
         )
         c.drawRoundRect(bar, bar.height() / 2, bar.height() / 2, Theme.line(Theme.withAlpha(Theme.NICKEL, 90), 1.4f))
+    }
+
+    /** A junction dot where conductors meet. */
+    private fun node(c: Canvas, cx: Float, cy: Float, r: Float, color: Int) {
+        c.drawCircle(cx, cy, r, Theme.solid(color))
     }
 
     /** The discharge resistor beside the field switch: a zig-zag on a stub. */

@@ -38,12 +38,14 @@ class PlantEvents {
     var relayTripped = false
     var interlocked = false
     var fieldSurge = false
+    var startingTxTripped = false
 
     fun clear() {
         fired = false; misfired = false; backfired = false
         breakerClosed = false; breakerOpened = false; roughClose = false; severeClose = false
         knifeSwitch = false; fuseBlew = false; demandChanged = false; poleSlip = false
         relayTripped = false; interlocked = false; fieldSurge = false
+        startingTxTripped = false
     }
 }
 
@@ -102,6 +104,11 @@ class Plant(seed: Long = System.nanoTime()) {
     /** Seconds spent off the bars because a target was left dropped. */
     var lockedOutSeconds: Double = 0.0
         private set
+
+    /** How many times the starting transformer has thrown itself off. */
+    var startingTxTrips: Int = 0
+        private set
+    private var startingTxStress = 0.0
 
     private var wasBreakerClosed = false
     private var previousDemandStep = 0
@@ -261,7 +268,7 @@ class Plant(seed: Long = System.nanoTime()) {
         // behind it however healthy the system is.
         engine.busSupplyPu =
             if (ctl.startingTxBreakerClosed) grid.volts / Spec.RATED_VOLTS else 0.0
-        engine.genTerminalPu = gen.emf(rpm) / Spec.RATED_VOLTS
+        engine.genTerminalPu = generatorBusPu()
         mainBus.step(dt, ctl.mainClosed, stationTransformerPu(), Service.CAPACITY_STATION_KW)
         if (mainBus.fuseBlewThisStep) events.fuseBlew = true
         engine.emgTxPu = emergencyTransformerPu()
@@ -331,6 +338,7 @@ class Plant(seed: Long = System.nanoTime()) {
         }
 
         grid.step(dt, gen, ctl)
+        stepStartingTransformer(dt)
 
         // ---- the relay panel ----------------------------------------------------
         val ampsPu = gen.lineAmps / Spec.RATED_AMPS
@@ -345,6 +353,40 @@ class Plant(seed: Long = System.nanoTime()) {
         checkFailures(dt)
 
         if (wasBreakerClosed != ctl.mainBreakerClosed) wasBreakerClosed = ctl.mainBreakerClosed
+    }
+
+    /**
+     * The starting transformer is a small machine meant for bringing a dead
+     * station alive, not for carrying a generator. With its breaker closed the
+     * terminals are already tied to the system through it, so exciting the
+     * machine before opening it parallels the set through a transformer that
+     * cannot hold it — and its own protection lets go with a bang.
+     *
+     * Open it before you bring the field up. That is the rule.
+     */
+    private fun stepStartingTransformer(dt: Double) {
+        val fighting = ctl.startingTxBreakerClosed && !ctl.mainBreakerClosed &&
+            rpm > 120.0 && gen.emf(rpm) > Spec.RATED_VOLTS * 0.22
+        if (fighting) {
+            // The vector difference across the transformer, exactly what the
+            // synchronising lamps are showing you.
+            val vg = gen.emf(rpm)
+            val vb = grid.volts
+            val diff = Math.sqrt(vg * vg + vb * vb - 2 * vg * vb * Math.cos(syncPhase)) / Spec.RATED_VOLTS
+            startingTxStress = if (diff > 0.35) {
+                startingTxStress + dt * (diff - 0.35) * 2.4
+            } else {
+                max(0.0, startingTxStress - dt * 0.45)
+            }
+            if (startingTxStress >= 1.0) {
+                ctl.startingTxBreakerClosed = false
+                startingTxStress = 0.0
+                startingTxTrips++
+                events.startingTxTripped = true
+            }
+        } else {
+            startingTxStress = max(0.0, startingTxStress - dt * 0.60)
+        }
     }
 
     private fun checkFailures(dt: Double) {
@@ -362,7 +404,12 @@ class Plant(seed: Long = System.nanoTime()) {
         if (engine.cylinders.any { it.wear >= 1.0 }) { fail(Failure.LINER_SCORED); return }
         if (engine.jacketTempC > Spec.SEIZE_JACKET_C) { fail(Failure.OVERHEAT_SEIZED); return }
         if (couplingDamage >= 1.5) { fail(Failure.OUT_OF_PHASE); return }
-        if (engine.batteryCharge <= 0.001 && rpm < 30.0 && !engine.running) {
+        // A flat battery is only fatal if there is no way to bring the station
+        // alive from outside either: with the starting transformer available you
+        // can back-feed the charging set and wait.
+        if (engine.batteryCharge <= 0.001 && rpm < 30.0 && !engine.running &&
+            generatorBusPu() < 0.30
+        ) {
             fail(Failure.BATTERY_DEAD); return
         }
     }
@@ -382,6 +429,7 @@ class Plant(seed: Long = System.nanoTime()) {
         for (l in service.loads) if (l.fuseBlown) s -= 6.0
         for (l in mainBus.loads) if (l.fuseBlown) s -= 6.0
         s -= relayTrips * 5.0
+        s -= startingTxTrips * 6.0
         s -= lockedOutSeconds * 0.20
         s -= aux.spilledL * 0.15
         s -= fieldInsulation * 12.0
@@ -395,9 +443,7 @@ class Plant(seed: Long = System.nanoTime()) {
      * machine feeds it whenever it is excited and turning, and the grid feeds it
      * as well once the unit breaker is closed.
      */
-    fun mainTransformerLive(): Boolean =
-        gen.emf(rpm) > Spec.RATED_VOLTS * 0.35 ||
-            (ctl.mainBreakerClosed && grid.volts > Spec.RATED_VOLTS * 0.45)
+    fun mainTransformerLive(): Boolean = generatorBusPu() > 0.35
 
     /**
      * Volts available to the field, per unit. The field hangs off the emergency
@@ -429,12 +475,26 @@ class Plant(seed: Long = System.nanoTime()) {
         if (ctl.stationTxBreakerClosed) transformerOutput() else 0.0
 
     /**
+     * Volts on the generator terminals bus, per unit — the orange bar everything
+     * in the station hangs off. Two things can hold it up: the machine itself,
+     * and the system back-feeding through the starting transformer. That is what
+     * makes a cold station startable: close the starting transformer breaker and
+     * the bar comes alive, and with it the main bus, the pumps, the lights and
+     * the charging set, all before the engine has turned over.
+     */
+    fun generatorBusPu(): Double {
+        val machine = genVolts / Spec.RATED_VOLTS
+        val backFeed = if (ctl.startingTxBreakerClosed) grid.volts / Spec.RATED_VOLTS else 0.0
+        return max(machine, backFeed)
+    }
+
+    /**
      * What either of the transformers hung on the generator terminals gives.
      * Below about a quarter of normal volts there is nothing worth having; above
      * that the secondary comes up quickly and then holds.
      */
     private fun transformerOutput(): Double {
-        val v = genVolts / Spec.RATED_VOLTS
+        val v = generatorBusPu()
         val t = clamp((v - 0.28) / 0.30, 0.0, 1.0)
         return t * t * (3 - 2 * t) * 1.02
     }
@@ -471,6 +531,7 @@ class Plant(seed: Long = System.nanoTime()) {
         engine.reset(); gen.reset(); grid.reset(); service.reset(); mainBus.reset()
         protection.reset(); aux.reset()
         relayTrips = 0; fieldInsulation = 0.0; lockedOutSeconds = 0.0
+        startingTxTrips = 0; startingTxStress = 0.0
         ctl.ignition = IgnitionMode.OFF
         ctl.throttle = 0.45; ctl.sparkLever = 0.30; ctl.mixture = 0.80; ctl.excitation = 0.0
         ctl.compressionRelease = false; ctl.primerCharges = 0
