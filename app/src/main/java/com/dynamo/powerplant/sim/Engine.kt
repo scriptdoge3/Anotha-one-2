@@ -35,8 +35,8 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     /** Volts on the grid, per unit, for the GRID position of the selector. */
     var busSupplyPu: Double = 1.0
 
-    /** Volts on the main bus, per unit, for the GEN position of the selector. */
-    var mainBusPu: Double = 0.0
+    /** Volts out of the emergency transformer, per unit, for the GEN position. */
+    var emgTxPu: Double = 0.0
 
     /**
      * Volts on the emergency line, per unit, and whether the ignition is
@@ -117,17 +117,18 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     fun gridSupply(): Double = clamp((busSupplyPu - 0.62) / 0.33, 0.0, 1.0)
 
     /**
-     * The tie across to the main bus, which is the machine carrying its own
-     * emergency line. Dead until the machine is excited and turning, which is
-     * why this position cannot start the engine and is the right place to run
-     * it — nothing outside the station can take it away.
+     * The output of the emergency transformer, which is the machine carrying its
+     * own emergency line — the same set that floats the battery across it. Dead
+     * until the machine is excited and turning, which is why this position
+     * cannot start the engine and is the right place to run it: nothing outside
+     * the station can take it away.
      *
-     * The circle closes on itself: the field is a load on the line the main bus
-     * is holding up. That is why the changeover from the battery has to be made
-     * briskly, before the field decays past the point where the machine can
-     * carry itself.
+     * The circle closes on itself: the field is a load on the line this
+     * transformer is holding up. That is why the changeover from the battery has
+     * to be made briskly, before the field decays past the point where the
+     * machine can carry itself.
      */
-    fun generatorSupply(@Suppress("UNUSED_PARAMETER") rpm: Double): Double = clamp(mainBusPu, 0.0, 1.0)
+    fun generatorSupply(@Suppress("UNUSED_PARAMETER") rpm: Double): Double = clamp(emgTxPu, 0.0, 1.0)
 
     /**
      * Battery terminal volts, per unit. A lead cell holds close to its nominal
@@ -370,7 +371,7 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         jacketTempC = 12.0; bearingTempC = 12.0
         oilFilm = 1.0; oilInSump = 1.0; oilPressureKpa = 0.0
         batteryCharge = 1.0; plugFouling = 0.0; floodLevel = 0.0; firingSuccess = 0.0
-        busSupplyPu = 1.0; mainBusPu = 0.0
+        busSupplyPu = 1.0; emgTxPu = 0.0
         serviceVolts = 0.0; ignitionLive = true
         coolantFlowPu = 0.0; oilPumpRunning = false
         genTerminalPu = 0.0; serviceDrawKw = 0.0

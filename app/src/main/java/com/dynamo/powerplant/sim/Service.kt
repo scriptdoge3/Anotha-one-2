@@ -36,7 +36,7 @@ class Service(val loads: List<ServiceLoad>) {
     companion object {
         /** What each source can deliver to the emergency line, in kilowatts. */
         const val CAPACITY_GRID_KW = 60.0
-        const val CAPACITY_MAIN_KW = 40.0
+        const val CAPACITY_EMG_TX_KW = 40.0
         const val CAPACITY_BATTERY_KW = 7.0
 
         /** What the station transformer can deliver to the main bus. */

@@ -213,12 +213,12 @@ class Plant(seed: Long = System.nanoTime()) {
         engine.genTerminalPu = gen.emf(rpm) / Spec.RATED_VOLTS
         mainBus.step(dt, ctl.mainClosed, stationTransformerPu(), Service.CAPACITY_STATION_KW)
         if (mainBus.fuseBlewThisStep) events.fuseBlew = true
-        engine.mainBusPu = mainBus.volts
+        engine.emgTxPu = emergencyTransformerPu()
 
         val strength = engine.sourceStrength(ctl, rpm)
         val capacity = when (ctl.ignition) {
             IgnitionMode.GRID -> Service.CAPACITY_GRID_KW
-            IgnitionMode.GEN -> Service.CAPACITY_MAIN_KW
+            IgnitionMode.GEN -> Service.CAPACITY_EMG_TX_KW
             IgnitionMode.EMG -> Service.CAPACITY_BATTERY_KW
             IgnitionMode.OFF -> 0.0
         }
@@ -333,16 +333,31 @@ class Plant(seed: Long = System.nanoTime()) {
         if (service.isRunning(Service.EXCITATION)) clamp(service.volts, 0.0, 1.0) else 0.0
 
     /**
+     * The emergency transformer, tapped off the generator terminals through its
+     * own breaker, per unit. Its output floats the battery and is what the GEN
+     * position of the selector puts on the emergency line. The main bus has
+     * nothing to do with it: the two internal supplies are separate all the way
+     * back to the machine.
+     */
+    fun emergencyTransformerPu(): Double =
+        if (ctl.emgTxBreakerClosed) transformerOutput() else 0.0
+
+    /**
      * The station transformer, tapped off the generator terminals, per unit.
      * This is the one thing that feeds the main bus, so the regular controls and
      * the big pumps are dead until the machine is turning and excited. Once the
      * unit breaker is closed the machine is held up by the system and the bus
      * comes with it.
      */
-    fun stationTransformerPu(): Double {
+    fun stationTransformerPu(): Double = transformerOutput()
+
+    /**
+     * What either of the transformers hung on the generator terminals gives.
+     * Below about a quarter of normal volts there is nothing worth having; above
+     * that the secondary comes up quickly and then holds.
+     */
+    private fun transformerOutput(): Double {
         val v = genVolts / Spec.RATED_VOLTS
-        // Below about a quarter of normal volts there is nothing worth having;
-        // above that the bus comes up quickly and then holds.
         val t = clamp((v - 0.28) / 0.30, 0.0, 1.0)
         return t * t * (3 - 2 * t) * 1.02
     }

@@ -43,7 +43,7 @@ object Mimic {
     private const val STATION_TX_Y = 0.455f
     private const val MAIN_BUS_Y = 0.560f
     private const val MAIN_LOAD_Y = 0.680f
-    private const val GEN_TAP_X = 0.455f
+    private const val GEN_TAP_X = 0.705f
 
     private const val EMG_BKR_X = 0.520f
     private const val EMG_BKR_Y = 0.455f
@@ -123,8 +123,8 @@ object Mimic {
         Theme.miniPlate(c, stx + u * 4.6f, y(STATION_TX_Y), "STATION TX", u * 0.56f, ambient)
         run(c, stx, y(STATION_TX_Y) + u * 1.15f, stx, y(MAIN_BUS_Y), u * 0.62f, stationCol, mainLive, phase, 0.4f, ambient)
 
-        bar(c, x(0.160f), x(0.430f), y(MAIN_BUS_Y), u * 0.85f, stationCol, mainLive, phase, 0.4f, ambient)
-        Theme.miniPlate(c, x(0.410f), y(MAIN_BUS_Y) - u * 1.5f, "MAIN BUS", u * 0.60f, ambient)
+        bar(c, x(0.160f), x(0.415f), y(MAIN_BUS_Y), u * 0.85f, stationCol, mainLive, phase, 0.4f, ambient)
+        Theme.miniPlate(c, x(0.400f), y(MAIN_BUS_Y) - u * 1.5f, "MAIN BUS", u * 0.60f, ambient)
 
         for (i in p.mainBus.loads.indices) {
             val l = p.mainBus.loads[i]
@@ -158,9 +158,20 @@ object Mimic {
         val bx = x(BATT_X)
         val dc = level(Theme.DC_LIVE, Theme.DC_DEAD, charging || battService, ambient)
         val chargeCol = level(Theme.DC_LIVE, Theme.DC_DEAD, charging, ambient)
-        run(c, etx + u * 1.15f, y(CHAIN_Y), bx - u * 1.4f, y(CHAIN_Y), u * 0.62f, chargeCol, charging, phase, 0.4f, ambient)
+        val txOut = level(Theme.DC_LIVE, Theme.DC_DEAD, feeding, ambient)
+        run(c, etx + u * 1.15f, y(CHAIN_Y), x(GEN_TAP_X), y(CHAIN_Y), u * 0.62f, txOut, feeding, phase, 0.4f, ambient)
+        run(c, x(GEN_TAP_X), y(CHAIN_Y), bx - u * 1.4f, y(CHAIN_Y), u * 0.62f, chargeCol, charging, phase, 0.4f, ambient)
         battery(c, bx, y(CHAIN_Y), u * 1.4f, p.engine.batteryCharge.toFloat(), dc, battService, charging, ambient)
         Theme.miniPlate(c, bx, y(CHAIN_Y) - u * 2.2f, "BATTERY", u * 0.60f, ambient)
+
+        // The emergency transformer's own tap onto the line. The battery floats
+        // across this same output, which is why one road charges the cells and
+        // the other carries the line.
+        val gtx = x(GEN_TAP_X)
+        val genTap = level(Theme.DC_LIVE, Theme.DC_DEAD, genService, ambient)
+        run(c, gtx, y(CHAIN_Y), gtx, y(LINE_Y) - u * 2.15f, u * 0.62f, genTap, genService, phase, 0.4f, ambient)
+        tap(c, gtx, y(LINE_Y) - u * 1.35f, u * 0.78f, genService, genTap, ambient)
+        run(c, gtx, y(LINE_Y) - u * 0.57f, gtx, y(LINE_Y), u * 0.62f, genTap, genService, phase, 0.4f, ambient)
 
         // The battery's own output. It is only alive when the cells are actually
         // the thing holding the line up; while they are charging the current is
@@ -180,13 +191,6 @@ object Mimic {
         val lineCol = level(Theme.DC_LIVE, Theme.DC_DEAD, lineLive, ambient)
         bar(c, x(0.040f), x(0.972f), y(LINE_Y), u * 0.85f, lineCol, lineLive, phase, 0.4f, ambient)
         Theme.miniPlate(c, x(0.640f), y(LINE_Y) + u * 1.7f, "EMERGENCY LINE", u * 0.60f, ambient)
-
-        // the tie across from the main bus: the machine carrying its own line
-        val gtx = x(GEN_TAP_X)
-        val genTap = level(Theme.AC_LIVE, Theme.AC_DEAD, genService, ambient)
-        run(c, gtx, y(MAIN_BUS_Y), gtx, y(LINE_Y) - u * 2.15f, u * 0.62f, genTap, genService, phase, 0.4f, ambient)
-        tap(c, gtx, y(LINE_Y) - u * 1.35f, u * 0.78f, genService, genTap, ambient)
-        run(c, gtx, y(LINE_Y) - u * 0.57f, gtx, y(LINE_Y), u * 0.62f, genTap, genService, phase, 0.4f, ambient)
 
         // the grid's tap, down through the starting transformer
         val sx = x(START_X)

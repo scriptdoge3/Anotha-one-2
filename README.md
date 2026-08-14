@@ -88,15 +88,15 @@ show as a blade swung clear of its jaws.
         |        |                    |              |
      [ GEN ]  STATION TX         EMG TX BREAKER       |
                  |                    |              |
-  ===== MAIN BUS =====+          EMERGENCY TX         |
-    |    |    |    |  |               |              |
-  CTRL CIRC  OIL LIGHT|            BATTERY           |
-   1.2 14.0  5.5  3.0 |               |              |
-                      |          BATTERY BKR         |
-                    (GEN)             |              |
-                      |             (EMG)          (GRID)
-                      |               |              |
-  ================= EMERGENCY LINE ====+==============+==
+  ===== MAIN BUS =====            EMERGENCY TX        |
+    |    |    |    |                  |              |
+  CTRL CIRC  OIL LIGHT                +--- BATTERY   |
+   1.2 14.0  5.5  3.0                 |       |      |
+                                    (GEN)  BATT BKR  |
+                                      |       |      |
+                                      |     (EMG)  (GRID)
+                                      |       |      |
+  ================= EMERGENCY LINE ====+=======+======+==
     |      |       |       |
    IGN    EXC   E.PUMP   E.LT
    0.6    2.2     4.0     1.2
@@ -107,16 +107,22 @@ high tension side, **orange** for generator voltage and the main bus, **green**
 for the emergency circuit. Every switching device carries a lamp, green when it
 is made and red when it is open.
 
+**The two internal supplies never touch.** They are separate all the way back
+to the generator terminals, each with its own transformer, and nothing ties one
+to the other. Losing the main bus costs you the pumps and the lights; losing the
+emergency line stops the engine.
+
 **The main bus** is fed off the generator terminals through the station
 transformer, and nothing else feeds it. Until the machine is turning and excited
 there is no control supply, no circulating pump, no oil pump and no house
 lights. Getting the field up is therefore part of starting, not part of
 synchronising.
 
-**The emergency circuit comes straight off the generator terminals too.**
-Through its own breaker, into the emergency transformer, and that is what
-charges the battery. The battery's output goes out through the battery breaker
-and onto the emergency line.
+**The emergency circuit comes straight off the generator terminals too**, on
+its own breaker and its own transformer. That transformer's output does two
+things: it charges the battery, and it is what the `GEN` position of the
+selector puts on the emergency line. The battery floats across the same output
+and goes out to the line through the battery breaker.
 
 That is the only road the charge takes back to the cells, so with the emergency
 transformer breaker open the battery is islanded and will only ever run down —
@@ -131,15 +137,15 @@ Watch the battery branch: it runs one way when you are drawing off `EMG` and the
 other way when the emergency transformer is putting the cells back.
 
 **The emergency line has a hard limit.** The grid will carry 60 kW into it and
-the main bus 40 kW, both more than it asks for. The battery will carry 7 kW,
+the emergency transformer 40 kW, both more than it asks for. The battery will carry 7 kW,
 which is barely enough — the ignition, the field and the emergency pump come to
 6.8 kW of it. Switch the emergency lights in as well and it goes over. Overload
 it far enough and the volts sag until loads drop out, and then a fuse goes.
 
 **The excitation is a load on that line.** Pull that switch, or let the line
 collapse, and the field goes with it — which off the bus means no volts, on the
-bus means a pole slip, and on `GEN` means the main bus dies and takes the line
-with it.
+bus means a pole slip, and on `GEN` means the emergency transformer dies and
+takes the line with it.
 
 **There are two pumps and they are on different buses.** The gate valve on the
 control deck meters the flow, but the circulating pump on the main bus is what
@@ -165,11 +171,11 @@ GRID --- GEN --- OFF --- EMG
   steady at any speed, so it will start a stone cold engine. But it fades as the
   grid volts sag, which means the ignition and the field go weak exactly when
   the system is in trouble and you most need the machine.
-- **GEN** — tied across to the main bus, which is the machine carrying its own
-  emergency line. Dead until the machine is excited, so it cannot start the
+- **GEN** — the output of the emergency transformer: the machine carrying its
+  own emergency line. Dead until the machine is excited, so it cannot start the
   engine, and it is the right place to run it because nothing outside the
   station can take it away. The circle closes on itself: the field is one of the
-  loads on the line the main bus is holding up.
+  loads on the line that transformer is holding up.
 - **OFF** — dead.
 - **EMG** — the battery, through the battery breaker. A fat spark at cranking
   speed that fades as the revolutions rise, and the only position that will turn
@@ -179,9 +185,8 @@ GRID --- GEN --- OFF --- EMG
 The layout is the point: `EMG` is where you start and `GEN` is where you run,
 and getting between them means passing through `OFF` with no ignition at all —
 and with no excitation either. Do it briskly. Dawdle and the field decays past
-the point where the station transformer has anything to work on, so the main bus
-never comes up, landing on `GEN` gives you nothing, and you are back to the
-battery.
+the point where the emergency transformer has anything to work on, so landing on
+`GEN` gives you nothing and you are back to the battery.
 
 ## Getting the engine lit, cold
 
@@ -207,9 +212,9 @@ The longer version, and what each of those settings is for:
 6. **Do not sit on the starter.** The cells also carry the ignition, the field
    and the emergency pump, so emergency supply is a clock.
 7. **Bring the field up once it is lit.** Until the machine is making volts
-   there is no main bus, which means no circulating pump, no oil pump, and
-   nothing for the `GEN` tap to carry. It is also what starts the cells
-   charging again. Then sweep the selector across to `GEN`.
+   there is no main bus — no circulating pump, no oil pump — and no emergency
+   transformer either, so nothing for the `GEN` tap to carry and nothing putting
+   the cells back. Then sweep the selector across to `GEN`.
 
 Then let the jacket come up to about 78 °C before you ask much of it.
 

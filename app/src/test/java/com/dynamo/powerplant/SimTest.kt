@@ -114,18 +114,30 @@ class SimTest {
     }
 
     @Test
-    fun theMainBusTieGivesNothingUntilTheMachineIsExcited() {
+    fun theGenTapGivesNothingUntilTheMachineIsExcited() {
         val p = Plant(1)
         p.ctl.ignition = IgnitionMode.GEN
-        // Stone cold: no volts on the terminals, so no station transformer, so
-        // no main bus and nothing for the tie to carry.
+        // Stone cold: no volts on the terminals, so the emergency transformer
+        // has nothing to work on and the tap is dead.
         run(p, 1.0)
-        assertTrue("the tie must be dead at rest", p.engine.sourceStrength(p.ctl, 0.0) < 0.02)
+        assertTrue("the tap must be dead at rest", p.engine.sourceStrength(p.ctl, 0.0) < 0.02)
 
         // Turning and excited, it is as good a supply as the machine is.
         assertTrue(startEngine(p))
-        assertTrue("the main bus should be alive", p.mainBus.volts > 0.9)
-        assertTrue("and the tie with it", p.engine.sourceStrength(p.ctl, p.rpm) > 0.9)
+        assertTrue("the tap should be alive", p.engine.sourceStrength(p.ctl, p.rpm) > 0.9)
+
+        // And it comes off the emergency transformer, not the main bus. Hold the
+        // line up from the grid so the field stays put, then open the emergency
+        // transformer breaker: the main bus does not notice, because it has its
+        // own transformer, but the tap is gone.
+        sweepKeyTo(p, IgnitionMode.GRID, 0.2)
+        p.ctl.emgTxBreakerClosed = false
+        run(p, 3.0) { tend(it) }
+        assertTrue("the main bus must be untouched, was ${p.mainBus.volts}", p.mainBus.volts > 0.9)
+        assertTrue("but the emergency transformer is out", p.emergencyTransformerPu() < 0.02)
+        p.ctl.ignition = IgnitionMode.GEN
+        run(p, 0.5)
+        assertTrue("so the tap gives nothing", p.engine.sourceStrength(p.ctl, p.rpm) < 0.02)
     }
 
     @Test
@@ -249,7 +261,7 @@ class SimTest {
         slow.ctl.ignition = IgnitionMode.GEN
         run(slow, 10.0) { tend(it) }
         assertTrue("a de-excited machine cannot carry its own line", !slow.running)
-        assertTrue("and the main bus should be dead with it", slow.mainBus.volts < 0.05)
+        assertTrue("and the emergency transformer with it", slow.emergencyTransformerPu() < 0.05)
 
         slow.ctl.ignition = IgnitionMode.EMG
         run(slow, 8.0) { tend(it) }
