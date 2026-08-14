@@ -9,6 +9,7 @@ import android.view.SurfaceView
 import com.dynamo.powerplant.audio.EngineAudio
 import com.dynamo.powerplant.sim.IgnitionMode
 import com.dynamo.powerplant.sim.Plant
+import com.dynamo.powerplant.sim.Spec
 import com.dynamo.powerplant.ui.Layout
 import com.dynamo.powerplant.ui.PanelRenderer
 import com.dynamo.powerplant.ui.Tab
@@ -170,7 +171,11 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
             return
         }
 
-        if (tab == Tab.CONTROL) onDownControl(l, id, x, y) else onDownElectrical(l, id, x, y)
+        when (tab) {
+            Tab.CONTROL -> onDownControl(l, id, x, y)
+            Tab.ENGINE -> onDownEngine(l, id, x, y)
+            Tab.ELECTRICAL -> onDownElectrical(l, id, x, y)
+        }
     }
 
     private fun onDownControl(l: Layout, id: Int, x: Float, y: Float) {
@@ -202,9 +207,54 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
         }
     }
 
+    private fun onDownEngine(l: Layout, id: Int, x: Float, y: Float) {
+        val p = plant
+
+        // --- the six cylinders ---
+        for (i in 0 until Spec.CYLINDERS) {
+            val sf = l.sightFeedAt(i)
+            if (sf.near(x, y, l.sightFeedR * 1.9f)) {
+                grabs[id] = Grab("feed$i", x, y, p.ctl.sightFeed[i]); return
+            }
+            if (l.igniterSwitch(i).contains(x, y)) {
+                p.ctl.igniterCutOut[i] = !p.ctl.igniterCutOut[i]
+                audio.clunk(); return
+            }
+        }
+
+        // --- the tanks ---
+        if (l.fuelCock.contains(x, y)) { p.ctl.fuelCock = !p.ctl.fuelCock; audio.clunk(); return }
+        if (l.fuelTransfer.contains(x, y)) { p.ctl.fuelTransfer = !p.ctl.fuelTransfer; audio.clunk(); return }
+        if (l.makeUpWheel.near(x, y, l.makeUpWheelR * 1.5f)) {
+            grabs[id] = Grab("makeup", x, y, p.ctl.makeUpValve); return
+        }
+        if (l.oilReplenish.near(x, y, l.oilReplenishR * 1.6f)) {
+            p.ctl.oilReplenish = true
+            pressed.add("oilfill")
+            grabs[id] = Grab("oilfill", x, y, 0.0)
+            return
+        }
+    }
+
     private fun onDownElectrical(l: Layout, id: Int, x: Float, y: Float) {
         val p = plant
-        if (l.mainBreaker.contains(x, y)) { p.toggleBreaker(); audio.clunk(); return }
+        if (l.mainBreaker.contains(x, y)) {
+            p.toggleBreaker()
+            if (p.events.interlocked) audio.tick() else audio.clunk()
+            return
+        }
+        // --- the relay panel: tap a dropped target to put it back ---
+        val n = p.protection.relays.size
+        for (i in 0 until n) {
+            if (l.relayWindow(i, n).contains(x, y)) { p.resetTarget(i); audio.tick(); return }
+        }
+        if (l.stationTxBreaker.contains(x, y)) {
+            p.ctl.stationTxBreakerClosed = !p.ctl.stationTxBreakerClosed; audio.clunk(); return
+        }
+        if (l.startingTxBreaker.contains(x, y)) {
+            p.ctl.startingTxBreakerClosed = !p.ctl.startingTxBreakerClosed; audio.clunk(); return
+        }
+        if (l.fieldSwitch.contains(x, y)) { p.toggleFieldSwitch(); audio.clunk(); return }
         if (l.emgTxBreaker.contains(x, y)) {
             p.ctl.emgTxBreakerClosed = !p.ctl.emgTxBreakerClosed; audio.clunk(); return
         }
@@ -230,6 +280,11 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
             "water" -> p.ctl.waterValve = wheelValue(g, y, l.waterWheelR)
             "oiler" -> p.ctl.oilerRate = wheelValue(g, y, l.oilerWheelR)
             "key" -> moveKey(l, x, y)
+            "makeup" -> p.ctl.makeUpValve = wheelValue(g, y, l.makeUpWheelR)
+            else -> if (g.id.startsWith("feed")) {
+                val i = g.id.removePrefix("feed").toInt()
+                p.ctl.sightFeed[i] = wheelValue(g, y, l.sightFeedR)
+            }
         }
     }
 
@@ -238,6 +293,7 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
         when (g.id) {
             "starter" -> plant.engine.starterEngaged = false
             "primer" -> pressed.remove("primer")
+            "oilfill" -> { plant.ctl.oilReplenish = false; pressed.remove("oilfill") }
         }
     }
 

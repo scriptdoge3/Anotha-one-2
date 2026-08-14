@@ -131,6 +131,161 @@ class Dial(
 object Instruments {
 
     /**
+     * A vertical column gauge, the way an exhaust pyrometer bank was read: six
+     * of them side by side against one scale, so an unbalanced engine shows up
+     * as a ragged skyline rather than a number you have to think about.
+     */
+    fun columnGauge(c: Canvas, r: RectF, value: Float, color: Int, ambient: Float) {
+        val w = r.width()
+        c.drawRoundRect(r, w * 0.18f, w * 0.18f, Theme.solid(Theme.dim(0xFF0A0C0E.toInt(), ambient)))
+        val h = r.height() * value.coerceIn(0f, 1f)
+        if (h > 1f) {
+            val fill = RectF(r.left + 2f, r.bottom - h, r.right - 2f, r.bottom - 2f)
+            c.drawRoundRect(fill, w * 0.15f, w * 0.15f, Theme.solid(color))
+            // a highlight down the left of the column, like glass
+            c.drawLine(
+                fill.left + w * 0.16f, fill.top + 3f, fill.left + w * 0.16f, fill.bottom - 3f,
+                Theme.line(Theme.withAlpha(Theme.LAMP_WHITE, (60 * ambient).toInt()), w * 0.10f)
+            )
+        }
+        c.drawRoundRect(r, w * 0.18f, w * 0.18f, Theme.line(Theme.withAlpha(Theme.NICKEL, 80), 1.8f))
+    }
+
+    /**
+     * One sight feed off the lubricator: a little glass with a drop hanging in
+     * it. The drop falls faster the more feed is set, and the glass runs dark
+     * when the liner behind it has gone dry.
+     */
+    fun sightFeed(c: Canvas, cx: Float, cy: Float, r: Float, feed: Float, film: Float, ambient: Float) {
+        // A tall narrow glass with a brass cap top and bottom, the way a
+        // force-feed lubricator's sight feeds are built.
+        val glass = RectF(cx - r * 0.40f, cy - r * 1.05f, cx + r * 0.40f, cy + r * 0.95f)
+        c.drawRoundRect(glass, r * 0.34f, r * 0.34f, Theme.solid(Theme.dim(0xFF0C0F12.toInt(), ambient)))
+
+        val col = when {
+            film < 0.35f -> Theme.DANGER
+            feed > 0.86f -> Theme.ACCENT_COOL
+            else -> Theme.ACCENT
+        }
+        // the oil standing in the bottom of the glass
+        val pool = RectF(glass.left + 2f, glass.bottom - r * 0.34f, glass.right - 2f, glass.bottom - 2f)
+        c.drawRoundRect(pool, r * 0.16f, r * 0.16f, Theme.solid(Theme.dim(col, ambient)))
+        // the drop on its way down: high in the glass on a slow feed, low on a
+        // fast one, so the whole bank can be read at a glance.
+        if (feed > 0.02f) {
+            val dy = glass.top + r * 0.30f + (1f - feed.coerceIn(0f, 1f)) * r * 1.05f
+            c.drawCircle(cx, dy, r * 0.17f, Theme.solid(Theme.dim(col, ambient)))
+            c.drawCircle(cx - r * 0.05f, dy - r * 0.05f, r * 0.06f,
+                Theme.solid(Theme.withAlpha(Theme.LAMP_WHITE, (120 * ambient).toInt())))
+        }
+        c.drawRoundRect(glass, r * 0.34f, r * 0.34f, Theme.line(Theme.withAlpha(Theme.NICKEL, 120), 1.8f))
+        // brass caps
+        for (y in listOf(glass.top, glass.bottom)) {
+            c.drawRoundRect(
+                RectF(cx - r * 0.52f, y - r * 0.11f, cx + r * 0.52f, y + r * 0.11f), 2f, 2f,
+                Theme.solid(Theme.dim(Theme.NICKEL, ambient))
+            )
+        }
+        // the knurled needle valve on its side, with an index line
+        val vx = cx + r * 0.86f
+        c.drawCircle(vx, cy + r * 0.30f, r * 0.30f, Theme.solid(Theme.dim(Theme.NICKEL_DARK, ambient)))
+        c.drawCircle(vx, cy + r * 0.30f, r * 0.30f, Theme.line(0x66000000, 1.6f))
+        val a = Math.toRadians(-100.0 + 300.0 * feed)
+        c.drawLine(
+            vx, cy + r * 0.30f,
+            vx + (Math.cos(a) * r * 0.27).toFloat(), cy + r * 0.30f + (Math.sin(a) * r * 0.27).toFloat(),
+            Theme.line(Theme.dim(Theme.MARK, ambient), r * 0.09f)
+        )
+    }
+
+    /** A gauge glass on the side of a tank, with the level standing in it. */
+    fun gaugeGlass(c: Canvas, r: RectF, value: Float, title: String, reading: String, ambient: Float) {
+        val w = r.width()
+        c.drawRoundRect(r, w * 0.30f, w * 0.30f, Theme.solid(Theme.dim(0xFF0A0C0E.toInt(), ambient)))
+        val v = value.coerceIn(0f, 1f)
+        val h = r.height() * v
+        val low = v < 0.18f
+        if (h > 1f) {
+            val fill = RectF(r.left + 3f, r.bottom - h, r.right - 3f, r.bottom - 3f)
+            c.drawRoundRect(
+                fill, w * 0.25f, w * 0.25f,
+                Theme.solid(Theme.dim(if (low) Theme.DANGER else Theme.ACCENT_COOL, ambient))
+            )
+            // the meniscus
+            c.drawLine(
+                fill.left, fill.top, fill.right, fill.top,
+                Theme.line(Theme.withAlpha(Theme.LAMP_WHITE, (110 * ambient).toInt()), 2.2f)
+            )
+        }
+        // graduations up the side
+        for (i in 1..3) {
+            val y = r.bottom - r.height() * i / 4f
+            c.drawLine(r.right - w * 0.34f, y, r.right - 3f, y, Theme.line(Theme.withAlpha(Theme.NICKEL, 70), 1.6f))
+        }
+        c.drawRoundRect(r, w * 0.30f, w * 0.30f, Theme.line(Theme.withAlpha(Theme.NICKEL, 120), 2.2f))
+        Theme.engrave(
+            c, title, r.centerX(), r.top - r.height() * 0.055f, w * 0.26f,
+            Theme.dim(Theme.NICKEL_LIT, ambient)
+        )
+        Theme.engrave(
+            c, reading, r.centerX(), r.bottom + r.height() * 0.135f, w * 0.26f,
+            Theme.dim(if (low) Theme.DANGER else Theme.MARK_SOFT, ambient)
+        )
+    }
+
+    /**
+     * One relay's target window. Behind the little glass sits a painted flag
+     * that drops when the relay operates and stays dropped until somebody puts
+     * it back — which is what the operator taps to reset.
+     *
+     * While the relay is picking up but has not yet operated, the disc travel
+     * shows as a filling arc, so a relay you are about to lose is visible before
+     * you lose it.
+     */
+    fun relayTarget(
+        c: Canvas, r: RectF, device: String, name: String,
+        dropped: Boolean, pickedUp: Boolean, travel: Float, flash: Float, ambient: Float
+    ) {
+        Theme.panelPlate(c, r, 5f, 0.8f, pinstripe = false)
+        val unit = minOf(r.width(), r.height())
+
+        Theme.engrave(
+            c, name, r.centerX(), r.top + r.height() * 0.245f,
+            Theme.fitSize(name, unit * 0.30f, r.width() * 0.88f),
+            Theme.dim(Theme.NICKEL_LIT, ambient)
+        )
+
+        // the window itself
+        val win = RectF(
+            r.left + r.width() * 0.14f, r.top + r.height() * 0.335f,
+            r.right - r.width() * 0.14f, r.bottom - r.height() * 0.115f
+        )
+        c.drawRoundRect(win, 4f, 4f, Theme.solid(Theme.dim(0xFF0A0C0E.toInt(), ambient)))
+
+        if (dropped) {
+            // the flag, painted the same red as every target ever made
+            c.drawRoundRect(win, 4f, 4f, Theme.solid(Theme.dim(Theme.DANGER, ambient)))
+            Theme.engrave(
+                c, device, win.centerX(), win.centerY() + win.height() * 0.30f,
+                win.height() * 0.72f, Theme.withAlpha(0xFF120504.toInt(), (255 * flash).toInt())
+            )
+        } else {
+            // the disc creeping round while the relay is timing out
+            if (travel > 0.01f) {
+                val fill = RectF(win.left + 2f, win.bottom - (win.height() - 4f) * travel.coerceIn(0f, 1f), win.right - 2f, win.bottom - 2f)
+                c.drawRoundRect(fill, 3f, 3f, Theme.solid(Theme.dim(if (pickedUp) Theme.ACCENT else Theme.STEEL_DARK, ambient)))
+            }
+            Theme.engrave(
+                c, device, win.centerX(), win.centerY() + win.height() * 0.28f,
+                win.height() * 0.62f,
+                Theme.dim(if (pickedUp) Theme.MARK else Theme.NICKEL_DARK, ambient)
+            )
+        }
+        c.drawRoundRect(win, 4f, 4f, Theme.line(Theme.withAlpha(Theme.NICKEL, 130), 2f))
+    }
+
+
+    /**
      * The synchroscope. Its pointer shows the phase angle between the machine
      * and the bus and rotates at the difference in frequency: clockwise when the
      * machine is running fast, anticlockwise when it is slow. You close the

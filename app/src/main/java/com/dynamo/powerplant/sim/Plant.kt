@@ -17,7 +17,8 @@ enum class Failure(val headline: String, val detail: String) {
     FLYWHEEL_BURST("FLYWHEEL BURST", "Load thrown off at full throttle with nobody on the valve. The rim went through the roof."),
     OUT_OF_PHASE("SHAFT WRECKED CLOSING OUT OF PHASE", "You closed the breaker with the machines fighting each other. The coupling sheared and took the crankshaft with it."),
     POLE_SLIP("MACHINE FELL OUT OF STEP", "Field too weak for the load being carried. The rotor slipped a pole and the whole station shook."),
-    GRID_TRIP("THROWN OFF THE SYSTEM", "The interconnection protection would not hold you any longer. The unit is off the bars and the dispatcher wants an explanation."),
+    LINER_SCORED("CYLINDER LINER PICKED UP", "One pot was run without oil until the piston picked up its liner and the rings went. The sight feed for it was shut."),
+    FIELD_FLASHOVER("FIELD WINDING FLASHED OVER", "The field switch was thrown in with the rheostat wide open once too often. The insulation let go and the collector rings arced over."),
     BATTERY_DEAD("NOTHING LEFT IN THE CELLS", "The battery is flat, the exciter will not fire at rest, and there is no way to turn the engine over."),
     SHIFT_COMPLETE("SHIFT COMPLETE", "Seven and a half hours on the boards. The day man is here to take over.")
 }
@@ -34,11 +35,15 @@ class PlantEvents {
     var fuseBlew = false
     var demandChanged = false
     var poleSlip = false
+    var relayTripped = false
+    var interlocked = false
+    var fieldSurge = false
 
     fun clear() {
         fired = false; misfired = false; backfired = false
         breakerClosed = false; breakerOpened = false; roughClose = false; severeClose = false
         knifeSwitch = false; fuseBlew = false; demandChanged = false; poleSlip = false
+        relayTripped = false; interlocked = false; fieldSurge = false
     }
 }
 
@@ -58,6 +63,10 @@ class Plant(seed: Long = System.nanoTime()) {
     val mainBus = Service.mainBus()
     /** The emergency line: ignition, excitation, emergency pump, emergency lights. */
     val service = Service.emergencyLine()
+    /** The relay panel, and the targets it drops. */
+    val protection = Protection()
+    /** The tanks: fuel, jacket water, lubricating oil. */
+    val aux = Auxiliaries()
     val events = PlantEvents()
 
     var rpm: Double = 0.0
@@ -82,8 +91,19 @@ class Plant(seed: Long = System.nanoTime()) {
     var overspeedSeconds: Double = 0.0
         private set
 
+    /** How many times a relay has put the unit off the bars this shift. */
+    var relayTrips: Int = 0
+        private set
+
+    /** Wear on the field insulation from throwing the switch in hot, 0..1. */
+    var fieldInsulation: Double = 0.0
+        private set
+
+    /** Seconds spent off the bars because a target was left dropped. */
+    var lockedOutSeconds: Double = 0.0
+        private set
+
     private var wasBreakerClosed = false
-    private var gridTripSeconds = 0.0
     private var previousDemandStep = 0
 
     val running: Boolean get() = engine.running
@@ -113,7 +133,34 @@ class Plant(seed: Long = System.nanoTime()) {
 
     fun toggleBreaker() {
         if (ended) return
-        if (ctl.mainBreakerClosed) openBreaker() else closeBreaker()
+        if (ctl.mainBreakerClosed) { openBreaker(); return }
+        // The interlock. A dropped target holds the closing mechanism out, so you
+        // cannot put the unit back on the bars until you have been to the relay
+        // panel and found out what put it off them.
+        if (protection.anyTarget) { events.interlocked = true; return }
+        closeBreaker()
+    }
+
+    /** Reset one dropped relay target by hand. */
+    fun resetTarget(i: Int) {
+        if (ended) return
+        if (protection.resetTarget(protection.relays[i])) events.knifeSwitch = true
+    }
+
+    /**
+     * Throw the field switch. Closing it with the rheostat anywhere but near the
+     * bottom throws the whole field on at once; the discharge resistor only
+     * protects you on the way out, not on the way in.
+     */
+    fun toggleFieldSwitch() {
+        if (ended) return
+        if (!ctl.fieldSwitchClosed && ctl.excitation > 0.25) {
+            events.fieldSurge = true
+            fieldInsulation = min(1.0, fieldInsulation + 0.18 + (ctl.excitation - 0.25) * 0.45)
+            if (fieldInsulation >= 1.0) { fail(Failure.FIELD_FLASHOVER); return }
+        }
+        ctl.fieldSwitchClosed = !ctl.fieldSwitchClosed
+        events.knifeSwitch = true
     }
 
     private fun closeBreaker() {
@@ -209,7 +256,11 @@ class Plant(seed: Long = System.nanoTime()) {
         // the generator terminals through the station transformer, and the
         // emergency line hangs off whichever source the selector is pointing at
         // — one of which is the main bus itself.
-        engine.busSupplyPu = grid.volts / Spec.RATED_VOLTS
+        // The starting transformer is on the system section of the high tension
+        // bar, behind its own breaker: open that and GRID supply has nothing
+        // behind it however healthy the system is.
+        engine.busSupplyPu =
+            if (ctl.startingTxBreakerClosed) grid.volts / Spec.RATED_VOLTS else 0.0
         engine.genTerminalPu = gen.emf(rpm) / Spec.RATED_VOLTS
         mainBus.step(dt, ctl.mainClosed, stationTransformerPu(), Service.CAPACITY_STATION_KW)
         if (mainBus.fuseBlewThisStep) events.fuseBlew = true
@@ -227,20 +278,36 @@ class Plant(seed: Long = System.nanoTime()) {
         engine.serviceVolts = service.volts
         engine.ignitionLive = service.isRunning(Service.IGNITION)
         engine.oilPumpRunning = mainBus.isRunning(Service.OIL_PUMP)
-        engine.coolantFlowPu = when {
+        // A pump with nothing in the header to circulate is a pump running dry.
+        val pumped = when {
             mainBus.isRunning(Service.CIRC_PUMP) -> 1.0
             service.isRunning(Service.EMG_PUMP) -> 0.42
             else -> 0.0
         }
+        engine.coolantFlowPu = pumped * aux.coolantAvailable()
         engine.serviceDrawKw = service.demandKw
 
+        // ---- the tanks ----------------------------------------------------------
+        aux.transferPumpRunning = mainBus.isRunning(Service.FUEL_PUMP)
+        engine.fuelSupply = aux.fuelAvailable(ctl)
+        engine.oilInSump = aux.sumpL / Auxiliaries.SUMP_CAP_L
+
         // ---- prime movers -------------------------------------------------------
-        var torque = engine.step(dt, ctl, rpm)
+        val torque = engine.step(dt, ctl, rpm)
         if (engine.firedThisStep) events.fired = true
         if (engine.misfiredThisStep) events.misfired = true
         if (engine.backfiredThisStep) events.backfired = true
 
         // ---- electrical ---------------------------------------------------------
+        aux.step(
+            dt, ctl,
+            burnPu = clamp(max(0.0, torque) / Spec.PEAK_TORQUE * (rpm / Spec.RATED_RPM), 0.0, 1.4),
+            jacketC = engine.jacketTempC,
+            flow = engine.coolantFlowPu * clamp(ctl.waterValve, 0.0, 1.0),
+            oilFeedLps = engine.oilFeedLps,
+            heatIn = engine.jacketHeatIn
+        )
+
         gen.stepField(dt, ctl, rpm, fieldSupplyPu())
         val elecTorque = gen.stepElectrical(dt, ctl, rpm, grid)
         if (gen.poleSlipThisStep) {
@@ -265,6 +332,15 @@ class Plant(seed: Long = System.nanoTime()) {
 
         grid.step(dt, gen, ctl)
 
+        // ---- the relay panel ----------------------------------------------------
+        val ampsPu = gen.lineAmps / Spec.RATED_AMPS
+        if (protection.step(dt, ctl.mainBreakerClosed, outputKw, ampsPu, gen.fieldFlux, grid.hz)) {
+            openBreaker()
+            relayTrips++
+            events.relayTripped = true
+        }
+        if (!ctl.mainBreakerClosed && protection.anyTarget) lockedOutSeconds += dt
+
         peakOutputKw = max(peakOutputKw, outputKw)
         checkFailures(dt)
 
@@ -283,15 +359,9 @@ class Plant(seed: Long = System.nanoTime()) {
         if (engine.bearingTempC > Spec.SEIZE_BEARING_C) { fail(Failure.BEARING_SEIZED); return }
         if (engine.bearingWear >= 1.0) { fail(Failure.THROWN_ROD); return }
         if (engine.knockDamage >= 1.0) { fail(Failure.PISTON_HOLED); return }
+        if (engine.cylinders.any { it.wear >= 1.0 }) { fail(Failure.LINER_SCORED); return }
         if (engine.jacketTempC > Spec.SEIZE_JACKET_C) { fail(Failure.OVERHEAT_SEIZED); return }
         if (couplingDamage >= 1.5) { fail(Failure.OUT_OF_PHASE); return }
-        // The system protection will not carry a unit that is badly out of step.
-        if (ctl.mainBreakerClosed && grid.outsideLimits()) {
-            gridTripSeconds += dt
-            if (gridTripSeconds > 4.0) { fail(Failure.GRID_TRIP); return }
-        } else {
-            gridTripSeconds = max(0.0, gridTripSeconds - dt * 0.5)
-        }
         if (engine.batteryCharge <= 0.001 && rpm < 30.0 && !engine.running) {
             fail(Failure.BATTERY_DEAD); return
         }
@@ -311,6 +381,11 @@ class Plant(seed: Long = System.nanoTime()) {
         s -= engine.bearingWear * 30.0
         for (l in service.loads) if (l.fuseBlown) s -= 6.0
         for (l in mainBus.loads) if (l.fuseBlown) s -= 6.0
+        s -= relayTrips * 5.0
+        s -= lockedOutSeconds * 0.20
+        s -= aux.spilledL * 0.15
+        s -= fieldInsulation * 12.0
+        s -= engine.cylinders.sumOf { it.wear } * 8.0
         if (failure != Failure.SHIFT_COMPLETE && failure != Failure.NONE) s -= 40.0
         return clamp(s, 0.0, 100.0).toInt()
     }
@@ -330,7 +405,8 @@ class Plant(seed: Long = System.nanoTime()) {
      * collapse — takes the excitation with it.
      */
     fun fieldSupplyPu(): Double =
-        if (service.isRunning(Service.EXCITATION)) clamp(service.volts, 0.0, 1.0) else 0.0
+        if (ctl.fieldSwitchClosed && service.isRunning(Service.EXCITATION))
+            clamp(service.volts, 0.0, 1.0) else 0.0
 
     /**
      * The emergency transformer, tapped off the generator terminals through its
@@ -349,7 +425,8 @@ class Plant(seed: Long = System.nanoTime()) {
      * unit breaker is closed the machine is held up by the system and the bus
      * comes with it.
      */
-    fun stationTransformerPu(): Double = transformerOutput()
+    fun stationTransformerPu(): Double =
+        if (ctl.stationTxBreakerClosed) transformerOutput() else 0.0
 
     /**
      * What either of the transformers hung on the generator terminals gives.
@@ -392,12 +469,18 @@ class Plant(seed: Long = System.nanoTime()) {
         failure = Failure.NONE; shiftSeconds = 0.0; peakOutputKw = 0.0; overspeedSeconds = 0.0
         wasBreakerClosed = false; previousDemandStep = 0
         engine.reset(); gen.reset(); grid.reset(); service.reset(); mainBus.reset()
-        gridTripSeconds = 0.0
+        protection.reset(); aux.reset()
+        relayTrips = 0; fieldInsulation = 0.0; lockedOutSeconds = 0.0
         ctl.ignition = IgnitionMode.OFF
         ctl.throttle = 0.45; ctl.sparkLever = 0.30; ctl.mixture = 0.80; ctl.excitation = 0.0
         ctl.compressionRelease = false; ctl.primerCharges = 0
         ctl.waterValve = 0.35; ctl.oilerRate = 0.45
+        for (i in ctl.sightFeed.indices) { ctl.sightFeed[i] = 0.5; ctl.igniterCutOut[i] = false }
+        ctl.fuelCock = true; ctl.fuelTransfer = false
+        ctl.makeUpValve = 0.0; ctl.oilReplenish = false
         ctl.mainBreakerClosed = false
+        ctl.stationTxBreakerClosed = true; ctl.startingTxBreakerClosed = true
+        ctl.fieldSwitchClosed = true
         ctl.emgTxBreakerClosed = true; ctl.batteryBreakerClosed = true
         ctl.auxClosed[0] = true; ctl.auxClosed[1] = true
         ctl.auxClosed[2] = true; ctl.auxClosed[3] = false

@@ -2,7 +2,7 @@ package com.dynamo.powerplant.ui
 
 import android.graphics.RectF
 
-enum class Tab(val label: String) { CONTROL("CONTROL"), ELECTRICAL("ELECTRICAL") }
+enum class Tab(val label: String) { CONTROL("CONTROL"), ENGINE("ENGINE"), ELECTRICAL("ELECTRICAL") }
 
 /**
  * The board is laid out in a virtual space 1080 wide and as tall as the phone's
@@ -35,7 +35,7 @@ class Layout(val w: Float, val h: Float) {
     val deck = RectF(0f, gaugeBoard.bottom, w, tabBar.top)
 
     fun tabRect(i: Int): RectF {
-        val each = w / 2f
+        val each = w / Tab.entries.size
         return RectF(each * i, tabBar.top, each * (i + 1), tabBar.bottom)
     }
 
@@ -76,7 +76,7 @@ class Layout(val w: Float, val h: Float) {
     )
 
     /** Height of the engraved header strip at the top of each panel. */
-    fun panelHeader(r: RectF): Float = r.height() * 0.145f
+    fun panelHeader(r: RectF): Float = minOf(r.height() * 0.145f, h * 0.0245f)
 
     // --- ENGINE panel ---------------------------------------------------------
     private val ep = enginePanel
@@ -127,20 +127,95 @@ class Layout(val w: Float, val h: Float) {
     val varMeter = RectF(w * 0.310f, gpBody + gpH * 0.630f, w * 0.640f, gpBody + gpH * 0.760f)
     val powerFactorAt = Pt(w * 0.830f, gpBody + gpH * 0.480f)
 
+    // ---------------------------------------------------------------- engine deck
+    // Six cylinders across the top, each with its exhaust pyrometer, its sight
+    // feed and its igniter cut-out. The tanks and their valves underneath.
+    private val ed = deck
+    private val edGap = ed.height() * 0.016f
+    private val edTop = ed.top + ed.height() * 0.020f
+    private val edH = ed.height() - ed.height() * 0.040f - edGap
+
+    val cylinderPanel = RectF(w * 0.018f, edTop, w * 0.982f, edTop + edH * 0.560f)
+    val tankPanel = RectF(w * 0.018f, cylinderPanel.bottom + edGap, w * 0.982f, cylinderPanel.bottom + edGap + edH * 0.440f)
+
+    private val cp = cylinderPanel
+    private val cpBody = cp.top + panelHeader(cp)
+    private val cpH = cp.bottom - cpBody
+
+    /** One column per cylinder, sharing the width of the panel. */
+    fun cylinderColumn(i: Int): RectF {
+        // A gutter down the left for the pyrometer scale and the row captions.
+        val left = cp.left + w * 0.078f
+        val right = cp.right - w * 0.012f
+        val each = (right - left) / 6f
+        return RectF(left + each * i + each * 0.04f, cpBody, left + each * (i + 1) - each * 0.04f, cp.bottom)
+    }
+
+    /** The exhaust pyrometer bar for one cylinder, read against a common scale. */
+    fun pyrometer(i: Int): RectF {
+        val c = cylinderColumn(i)
+        return RectF(c.left + c.width() * 0.26f, cpBody + cpH * 0.045f, c.right - c.width() * 0.26f, cpBody + cpH * 0.430f)
+    }
+
+    fun sightFeedAt(i: Int): Pt {
+        val c = cylinderColumn(i)
+        return Pt(c.centerX(), cpBody + cpH * 0.595f)
+    }
+    val sightFeedR = minOf(w * 0.043f, cpH * 0.115f)
+
+    fun igniterSwitch(i: Int): RectF {
+        val c = cylinderColumn(i)
+        return RectF(c.left + c.width() * 0.14f, cpBody + cpH * 0.790f, c.right - c.width() * 0.14f, cpBody + cpH * 0.960f)
+    }
+
+    // --- the tanks ---
+    private val tp = tankPanel
+    private val tpBody = tp.top + panelHeader(tp)
+    private val tpH = tp.bottom - tpBody
+
+    /** Three gauge glasses: fuel day tank, jacket water header, oil sump. */
+    fun tankGlass(i: Int): RectF {
+        val each = w * 0.115f
+        val left = tp.left + w * 0.038f + each * i * 1.42f
+        return RectF(left, tpBody + tpH * 0.180f, left + each * 0.42f, tpBody + tpH * 0.760f)
+    }
+
+    val fuelCock = RectF(w * 0.520f, tpBody + tpH * 0.075f, w * 0.725f, tpBody + tpH * 0.360f)
+    val fuelTransfer = RectF(w * 0.750f, tpBody + tpH * 0.075f, w * 0.955f, tpBody + tpH * 0.360f)
+    val mainTankBar = RectF(w * 0.520f, tpBody + tpH * 0.450f, w * 0.955f, tpBody + tpH * 0.545f)
+    val oilReplenish = Pt(w * 0.610f, tpBody + tpH * 0.755f)
+    val oilReplenishR = minOf(w * 0.048f, tpH * 0.130f)
+    val makeUpWheel = Pt(w * 0.855f, tpBody + tpH * 0.740f)
+    val makeUpWheelR = minOf(w * 0.052f, tpH * 0.145f)
+
     // ---------------------------------------------------------------- electrical deck
     /** The mimic diagram takes the upper part of the switchboard. */
     val mimic = RectF(
-        w * 0.020f, deck.top + deck.height() * 0.024f,
-        w * 0.980f, deck.top + deck.height() * 0.508f
+        w * 0.020f, deck.top + deck.height() * 0.020f,
+        w * 0.980f, deck.top + deck.height() * 0.400f
     )
 
+    /** The relay panel: one target window per relay, under the mimic. */
+    val relayPlate = RectF(
+        w * 0.020f, mimic.bottom + deck.height() * 0.020f,
+        w * 0.980f, mimic.bottom + deck.height() * 0.148f
+    )
+
+    fun relayWindow(i: Int, n: Int): RectF {
+        val left = relayPlate.left + w * 0.016f
+        val right = relayPlate.right - w * 0.016f
+        val each = (right - left) / n
+        val top = relayPlate.top + relayPlate.height() * 0.300f
+        return RectF(left + each * i + each * 0.06f, top, left + each * (i + 1) - each * 0.06f, relayPlate.bottom - relayPlate.height() * 0.090f)
+    }
+
     val boardPlate = RectF(
-        w * 0.020f, mimic.bottom + deck.height() * 0.026f,
-        w * 0.980f, deck.bottom - deck.height() * 0.018f
+        w * 0.020f, relayPlate.bottom + deck.height() * 0.018f,
+        w * 0.980f, deck.bottom - deck.height() * 0.014f
     )
     val mainBreaker = RectF(
-        boardPlate.left + w * 0.018f, boardPlate.top + boardPlate.height() * 0.060f,
-        boardPlate.left + w * 0.215f, boardPlate.bottom - boardPlate.height() * 0.050f
+        boardPlate.left + w * 0.018f, boardPlate.top + boardPlate.height() * 0.055f,
+        boardPlate.left + w * 0.200f, boardPlate.bottom - boardPlate.height() * 0.045f
     )
 
     /**
@@ -153,9 +228,9 @@ class Layout(val w: Float, val h: Float) {
     private val rowsH = boardPlate.height() * 0.900f
     private val rowGap = boardPlate.height() * 0.030f
 
-    val mainRowLabel = RectF(rowsLeft, rowsTop, rowsRight, rowsTop + rowsH * 0.075f)
-    private val mainRow = RectF(rowsLeft, mainRowLabel.bottom, rowsRight, rowsTop + rowsH * 0.485f)
-    val emgRowLabel = RectF(rowsLeft, mainRow.bottom + rowGap, rowsRight, mainRow.bottom + rowGap + rowsH * 0.075f)
+    val mainRowLabel = RectF(rowsLeft, rowsTop, rowsRight, rowsTop + rowsH * 0.068f)
+    private val mainRow = RectF(rowsLeft, mainRowLabel.bottom, rowsRight, rowsTop + rowsH * 0.480f)
+    val emgRowLabel = RectF(rowsLeft, mainRow.bottom + rowGap, rowsRight, mainRow.bottom + rowGap + rowsH * 0.068f)
     private val emgRow = RectF(rowsLeft, emgRowLabel.bottom, rowsRight, rowsTop + rowsH)
 
     private fun cells(r: RectF, n: Int): List<RectF> {
@@ -165,10 +240,22 @@ class Layout(val w: Float, val h: Float) {
         }
     }
 
-    /** The regular controls and pumps: control supply, circulating pump, oil pump, lights. */
-    val mainSwitches: List<RectF> = cells(mainRow, 4)
+    /**
+     * The main bus row: its own breaker, the starting transformer breaker, and
+     * then the five regular loads.
+     */
+    private val mainCells = cells(mainRow, 7)
 
-    private val emgCells = cells(emgRow, 6)
+    /** Generator terminals to the station transformer. */
+    val stationTxBreaker: RectF = mainCells[0]
+
+    /** The grid tap, up on the system section of the high tension bar. */
+    val startingTxBreaker: RectF = mainCells[1]
+
+    /** Control supply, circulating pump, oil pump, fuel pump, house lights. */
+    val mainSwitches: List<RectF> = mainCells.subList(2, 7)
+
+    private val emgCells = cells(emgRow, 7)
 
     /** Generator to the emergency transformer, the road the charge takes. */
     val emgTxBreaker: RectF = emgCells[0]
@@ -176,8 +263,11 @@ class Layout(val w: Float, val h: Float) {
     /** Battery out to the emergency line. */
     val batteryBreaker: RectF = emgCells[1]
 
+    /** The field switch, with its discharge resistor. */
+    val fieldSwitch: RectF = emgCells[2]
+
     /** The four emergency line switches on the board. */
-    val auxSwitches: List<RectF> = emgCells.subList(2, 6)
+    val auxSwitches: List<RectF> = emgCells.subList(3, 7)
 
     // ---------------------------------------------------------------- annunciator
     val alarmR = minOf(w * 0.026f, annunciator.height() * 0.30f)

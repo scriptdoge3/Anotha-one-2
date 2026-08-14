@@ -46,7 +46,8 @@ class Service(val loads: List<ServiceLoad>) {
         const val CONTROL = 0
         const val CIRC_PUMP = 1
         const val OIL_PUMP = 2
-        const val LIGHTS = 3
+        const val FUEL_PUMP = 3
+        const val LIGHTS = 4
 
         // --- positions on the emergency line ---
         const val IGNITION = 0
@@ -60,6 +61,7 @@ class Service(val loads: List<ServiceLoad>) {
                 ServiceLoad("CONTROL SUPPLY", "CTRL", 1.20, 0.45),
                 ServiceLoad("CIRCULATING PUMP", "CIRC", 14.00, 0.55),
                 ServiceLoad("OIL PUMP", "OIL", 5.50, 0.50),
+                ServiceLoad("FUEL TRANSFER PUMP", "FUEL", 3.50, 0.50),
                 ServiceLoad("HOUSE LIGHTS", "LIGHT", 3.00, 0.25)
             )
         )

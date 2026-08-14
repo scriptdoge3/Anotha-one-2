@@ -17,15 +17,38 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     // --- thermal / lube state ---
     var jacketTempC: Double = 12.0      // starts stone cold on a winter morning
     var bearingTempC: Double = 12.0
-    var oilFilm: Double = 1.0           // 1 = fully wetted, 0 = metal to metal
+    var oilFilm: Double = 1.0           // mean film across the six liners
     var oilInSump: Double = 1.0         // 0..1 reservoir remaining
     var oilPressureKpa: Double = 0.0
 
+    /** The six pots, each with its own igniter, its own feed and its own history. */
+    val cylinders = List(Spec.CYLINDERS) {
+        // No two pots breathe alike. A few per cent either way is what makes the
+        // pyrometer bank a ragged skyline instead of six identical bars, and it
+        // is why you learn which of yours runs hot.
+        Cylinder(it + 1, 0.93 + rnd.nextDouble() * 0.14)
+    }
+
     // --- ignition / fuelling state ---
     var batteryCharge: Double = 1.0     // 0..1
-    var plugFouling: Double = 0.0       // 0..1, cuts spark energy
     var floodLevel: Double = 0.0        // 0..1, over-priming
     var firingSuccess: Double = 0.0     // smoothed fraction of charges that light
+
+    /** Mean deposit across the six igniters, for the gauge and the alarm. */
+    val plugFouling: Double get() = cylinders.sumOf { it.fouling } / Spec.CYLINDERS
+
+    /** How much fuel is reaching the carburettor, 0..1. Set by the Plant. */
+    var fuelSupply: Double = 1.0
+
+    /** Litres a second the lubricator is putting up the bores, for the sump. */
+    var oilFeedLps: Double = 0.0
+
+    /** Heat going into the jacket water this instant, for the outlet temperature. */
+    var jacketHeatIn: Double = 0.0
+
+    /** Which cylinder fired most recently, for the exhaust beat. */
+    var lastFiredCylinder: Int = 0
+        private set
 
     // --- wear / damage accumulators ---
     var knockIndex: Double = 0.0        // instantaneous detonation intensity 0..1
@@ -77,6 +100,7 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         private set
 
     private var firingPhase: Double = 0.0
+    private var firingIndex: Int = 0
     private var revsSincePrime: Double = 0.0
 
     val ambientC = 8.0
@@ -92,7 +116,17 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         // Fed from the cells it is a coil box, and the coil runs out of dwell as
         // the revolutions rise. Fed from the bus it is a proper transformer set.
         if (ctl.ignition == IgnitionMode.EMG) e *= coilDwellFade(rpm)
-        return clamp(e * (1.0 - 0.85 * plugFouling), 0.0, 1.0)
+        return clamp(e, 0.0, 1.0)
+    }
+
+    /**
+     * What actually reaches one igniter: the common supply, less whatever that
+     * pot has laid on its own points, and nothing at all if it is cut out at the
+     * switch.
+     */
+    fun sparkAt(ctl: Controls, rpm: Double, c: Cylinder): Double {
+        if (c.cutOut) return 0.0
+        return clamp(sparkEnergy(ctl, rpm) * (1.0 - 0.85 * c.fouling), 0.0, 1.0)
     }
 
     /** How well the battery coil box keeps up as the engine speeds up. */
@@ -189,15 +223,23 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         misfiredThisStep = false
         backfiredThisStep = false
 
+        // The cut-out switches on the board are the operator's hand on each
+        // igniter, so read them before anything else fires.
+        for ((i, c) in cylinders.withIndex()) c.cutOut = ctl.igniterCutOut[i]
+
         val afr = ctl.airFuelRatio()
         val advance = ctl.sparkAdvanceDeg()
-        val energy = sparkEnergy(ctl, rpm)
 
         // ---- charge preparation -------------------------------------------------
-        // Idle bleed means the throttle is never fully shut off.
+        // Idle bleed means the throttle is never fully shut off. What the
+        // carburettor can actually deliver is capped by the gravity tank: run the
+        // day tank down and the engine leans out and dies whatever the needle says.
         val airflow = 0.085 + 0.915 * Math.pow(clamp(ctl.throttle, 0.0, 1.0), 1.25)
+        val starve = clamp(fuelSupply, 0.0, 1.0)
         val primeActive = ctl.primerCharges > 0
-        val effectiveAfr = inCylinderAfr(afr, jacketTempC, primeActive, floodLevel)
+        // Starvation shows up as a lean charge, because that is what it is.
+        val suppliedAfr = afr / clamp(starve, 0.25, 1.0)
+        val effectiveAfr = inCylinderAfr(suppliedAfr, jacketTempC, primeActive, floodLevel)
 
         val mixEff = mixtureEfficiency(effectiveAfr)
         val sparkEff = sparkEfficiency(advance, optimalAdvanceDeg(rpm, effectiveAfr))
@@ -205,22 +247,40 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         // engine run with the water gate wide open is down on power all night.
         val coldEff = clamp(0.86 + jacketTempC / 450.0, 0.0, 1.0)
 
-        // ---- will the charge actually light? -----------------------------------
-        val lightable = energy > 0.16 && mixEff > 0.12 && !ctl.compressionRelease && floodLevel < 0.85
-        val ignitionQuality = if (lightable) clamp(energy * 1.35, 0.0, 1.0) * clamp(mixEff * 1.6, 0.0, 1.0) else 0.0
-
-        // Count discrete firing events for sound and for the exhaust beat.
+        // ---- the firing order ---------------------------------------------------
+        // Every power stroke belongs to a named cylinder, so a misfire is a pot
+        // you can find rather than a number that got worse.
         firingPhase += rpm / 60.0 * Spec.FIRINGS_PER_REV * dt
         var events = 0
         while (firingPhase >= 1.0) {
             firingPhase -= 1.0
             events++
         }
-        if (events > 0) {
-            val lit = rnd.nextDouble() < ignitionQuality
-            if (lit) firedThisStep = true else misfiredThisStep = true
+        repeat(min(events, 12)) {
+            val c = cylinders[Cylinder.FIRING_ORDER[firingIndex % Spec.CYLINDERS]]
+            firingIndex++
+            lastFiredCylinder = c.number
+
+            val energy = sparkAt(ctl, rpm, c)
+            val lightable = energy > 0.16 && mixEff > 0.12 &&
+                !ctl.compressionRelease && floodLevel < 0.85 && starve > 0.12
+            val quality = if (lightable) clamp(energy * 1.35, 0.0, 1.0) * clamp(mixEff * 1.6, 0.0, 1.0) else 0.0
+
+            c.firedThisStep = false
+            c.misfiredThisStep = false
+            val lit = rnd.nextDouble() < quality
+            if (lit) { c.firedThisStep = true; firedThisStep = true }
+            else { c.misfiredThisStep = true; misfiredThisStep = true }
             // Unburnt charge in a hot exhaust pipe eventually goes off with a bang.
             if (!lit && lightable && jacketTempC > 60.0 && rnd.nextDouble() < 0.05) backfiredThisStep = true
+
+            // Each pot's own running average, advanced once per power stroke.
+            // A charge that will not light drops it as fast as a good one lifts it.
+            c.firingSuccess += (quality - c.firingSuccess) * 0.34
+        }
+        if (events == 0) {
+            for (c in cylinders) { c.firedThisStep = false; c.misfiredThisStep = false }
+        } else {
             // A squirt of raw gasoline is good for about a dozen charges.
             revsSincePrime += events.toDouble()
             if (revsSincePrime >= 12.0) {
@@ -228,12 +288,19 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
                 if (ctl.primerCharges > 0) ctl.primerCharges--
             }
         }
+        // A cut-out pot decays to nothing whether it is being called on or not.
+        for (c in cylinders) {
+            if (c.cutOut) c.firingSuccess += (0.0 - c.firingSuccess) * min(1.0, dt * 4.0)
+        }
 
-        firingSuccess += (ignitionQuality - firingSuccess) * min(1.0, dt * 6.0)
+        firingSuccess = cylinders.sumOf { it.firingSuccess } / Spec.CYLINDERS
 
         // ---- indicated torque ---------------------------------------------------
+        // Each pot contributes its own sixth, so five good ones and a dead one is
+        // five sixths of the power and a very obvious limp.
         val speedCurve = torqueCurve(rpm)
-        var torque = Spec.PEAK_TORQUE * airflow * mixEff * sparkEff * speedCurve * firingSuccess * coldEff
+        val perPot = Spec.PEAK_TORQUE / Spec.CYLINDERS * airflow * mixEff * sparkEff * speedCurve * coldEff
+        var torque = perPot * cylinders.sumOf { it.firingSuccess }
         torque *= clamp(1.0 - knockDamage * 0.75, 0.15, 1.0)
         // A boiling jacket loses charge density and starts to lose power.
         if (jacketTempC > 100.0) torque *= clamp(1.0 - (jacketTempC - 100.0) / 55.0, 0.25, 1.0)
@@ -274,7 +341,7 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         // ---- flooding -----------------------------------------------------------
         if (ctl.primerCharges > 3) floodLevel = min(1.0, floodLevel + dt * 0.30 * (ctl.primerCharges - 3))
         // Cranking on a wide throttle with no spark clears a flooded cylinder.
-        val clearing = if (energy < 0.16 && ctl.throttle > 0.8 && rpm > 40.0) 0.35 else 0.06
+        val clearing = if (sparkEnergy(ctl, rpm) < 0.16 && ctl.throttle > 0.8 && rpm > 40.0) 0.35 else 0.06
         floodLevel = max(0.0, floodLevel - dt * clearing * (1.0 + rpm / 300.0))
 
         stepThermal(dt, ctl, rpm, effectiveAfr, advance, torque)
@@ -314,42 +381,71 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         val cooling = (0.05 + 1.30 * flow) * (jacketTempC - ambientC) * 0.0535
         jacketTempC += (heatIn - cooling) * dt
         jacketTempC = max(ambientC, jacketTempC)
+        jacketHeatIn = heatIn
+
+        // Each pot's exhaust follows what that pot is burning, which is what
+        // makes the pyrometer worth reading.
+        for (c in cylinders) {
+            c.stepExhaust(dt, burnPu * c.firingSuccess, leanHeat, retardHeat, ambientC)
+        }
 
         // Bearings pick up jacket heat plus whatever the oil film fails to carry away.
-        val frictionHeat = (1.0 - oilFilm) * (2.4 + rpm * 0.022) + rpm * 0.0016
+        val frictionHeat = (1.0 - cylinders.minOf { it.oilFilm }) * (2.4 + rpm * 0.022) + rpm * 0.0016
         val bearingCool = (bearingTempC - jacketTempC * 0.55 - ambientC * 0.45) * 0.055
         bearingTempC += (frictionHeat - bearingCool) * dt
         bearingTempC = max(ambientC, bearingTempC)
 
-        // A rich charge lays carbon on the plugs, and so does a lubricator run
-        // wide open, which puts more oil up the bore than the rings can scrape off.
-        val fouling = clamp((11.4 - afr) / 3.0, 0.0, 1.0) * 0.030 +
-            clamp((ctl.oilerRate - 0.88) / 0.12, 0.0, 1.0) * 0.020
+        // A rich charge lays carbon on every igniter alike; an over-generous
+        // sight feed only fouls the pot it belongs to, which is why one cylinder
+        // can quietly go off while the other five are perfect.
+        val richFouling = clamp((11.4 - afr) / 3.0, 0.0, 1.0) * 0.030
         // A hot engine on a sensible mixture burns the deposit off again.
         val cleaning = if (afr > 12.2 && jacketTempC > 70.0 && rpm > 350.0) 0.012 else 0.0
-        plugFouling = clamp(plugFouling + (fouling - cleaning) * dt, 0.0, 1.0)
+        for ((i, c) in cylinders.withIndex()) {
+            val feed = ctl.oilerRate * clamp(ctl.sightFeed[i], 0.0, 1.0) * 2.0
+            val wetFouling = clamp((feed - 0.88) / 0.30, 0.0, 1.0) * 0.026
+            // A cold pot never burns anything off, and a cut-out one only collects.
+            val burnOff = if (c.cutOut) 0.0 else cleaning
+            c.fouling = clamp(c.fouling + (richFouling + wetFouling - burnOff) * dt, 0.0, 1.0)
+        }
     }
 
     private fun stepLubrication(dt: Double, ctl: Controls, rpm: Double, torque: Double) {
-        if (ctl.oilerRate > 0.0 && oilInSump > 0.0) {
-            oilInSump = max(0.0, oilInSump - dt * ctl.oilerRate * 0.0043)
-        }
         // The lubricator drips into a forced-feed pump on the main bus. Lose the
-        // pump and what the sight glasses show still reaches the bearings, but
-        // only what gravity will carry, so the feed has to be opened up to make
-        // up for it.
+        // pump and what the sight glasses show still reaches the bores, but only
+        // what gravity will carry, so the feeds have to be opened up to make up
+        // for it.
         val pumpFactor = if (oilPumpRunning) 1.0 else 0.80
-        val supply = if (oilInSump > 0.0) ctl.oilerRate * pumpFactor else 0.0
-        // Demand climbs with speed and with the load being carried.
-        val demand = clamp(rpm / 600.0 * 0.55 + abs(torque) / Spec.PEAK_TORQUE * 0.42, 0.0, 1.6)
-        val deficit = demand - supply
-        val rate = if (deficit > 0) deficit * 0.30 else deficit * 0.55
-        oilFilm = clamp(oilFilm - rate * dt, 0.0, 1.0)
+        val dry = oilInSump <= 0.0
 
+        // Demand climbs with speed and with the load being carried, and it is
+        // the same for every pot because they are all on the same crank.
+        val demand = clamp(rpm / 600.0 * 0.55 + abs(torque) / Spec.PEAK_TORQUE * 0.42, 0.0, 1.6)
+
+        var totalFeed = 0.0
+        for ((i, c) in cylinders.withIndex()) {
+            // Half on a sight feed is the nominal setting, so the master handwheel
+            // means the same as it always did with the feeds where they were left.
+            val feed = ctl.oilerRate * clamp(ctl.sightFeed[i], 0.0, 1.0) * 2.0
+            totalFeed += feed
+            val supply = if (dry) 0.0 else feed * pumpFactor
+            val deficit = demand - supply
+            val rate = if (deficit > 0) deficit * 0.30 else deficit * 0.55
+            c.oilFilm = clamp(c.oilFilm - rate * dt, 0.0, 1.0)
+            if (c.oilFilm < 0.35 && rpm > 60.0) {
+                c.wear = min(1.0, c.wear + dt * (0.35 - c.oilFilm) * 0.24)
+            }
+        }
+        // Litres a second up the bores, which is what drains the sump.
+        oilFeedLps = totalFeed / Spec.CYLINDERS * 0.0125
+
+        oilFilm = cylinders.sumOf { it.oilFilm } / Spec.CYLINDERS
         oilPressureKpa = clamp(oilFilm * (28.0 + rpm * 0.30), 0.0, 240.0)
 
-        if (oilFilm < 0.35 && rpm > 60.0) {
-            bearingWear = min(1.0, bearingWear + dt * (0.35 - oilFilm) * 0.30)
+        // The main bearings see the worst of whatever the liners are seeing.
+        val worst = cylinders.minOf { it.oilFilm }
+        if (worst < 0.35 && rpm > 60.0) {
+            bearingWear = min(1.0, bearingWear + dt * (0.35 - worst) * 0.30)
         }
         if (bearingTempC > 150.0) {
             bearingWear = min(1.0, bearingWear + dt * (bearingTempC - 150.0) * 0.0055)
@@ -368,9 +464,11 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     }
 
     fun reset() {
+        for (c in cylinders) c.reset()
         jacketTempC = 12.0; bearingTempC = 12.0
         oilFilm = 1.0; oilInSump = 1.0; oilPressureKpa = 0.0
-        batteryCharge = 1.0; plugFouling = 0.0; floodLevel = 0.0; firingSuccess = 0.0
+        fuelSupply = 1.0; oilFeedLps = 0.0; jacketHeatIn = 0.0; lastFiredCylinder = 0
+        batteryCharge = 1.0; floodLevel = 0.0; firingSuccess = 0.0
         busSupplyPu = 1.0; emgTxPu = 0.0
         serviceVolts = 0.0; ignitionLive = true
         coolantFlowPu = 0.0; oilPumpRunning = false
@@ -378,7 +476,7 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         knockIndex = 0.0; knockDamage = 0.0; bearingWear = 0.0
         starterEngaged = false; starterCranking = false; starterHeat = 0.0
         batteryChargingNow = false
-        firingPhase = 0.0; revsSincePrime = 0.0; running = false
+        firingPhase = 0.0; firingIndex = 0; revsSincePrime = 0.0; running = false
     }
 }
 

@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
+import com.dynamo.powerplant.sim.Auxiliaries
 import com.dynamo.powerplant.sim.Grid
 import com.dynamo.powerplant.sim.IgnitionMode
 import com.dynamo.powerplant.sim.Plant
@@ -59,7 +60,10 @@ class PanelRenderer(val L: Layout) {
     private var backgroundTab: Tab? = null
 
     /** Alarms across the annunciator strip, in the order they are wired. */
-    private val alarmNames = listOf("OVERSPEED", "LOW OIL", "HOT", "KNOCK", "REV. PWR", "FIELD", "FUSE", "BATTERY")
+    private val alarmNames = listOf(
+        "OVERSPEED", "LOW OIL", "HOT", "KNOCK", "MISFIRE",
+        "FIELD", "FUSE", "BATTERY", "FUEL", "WATER", "RELAY"
+    )
 
     // ------------------------------------------------------------------ static
 
@@ -69,7 +73,11 @@ class PanelRenderer(val L: Layout) {
         drawRoom(c, ambient)
         drawHeaderPlate(c, ambient)
         drawGaugeBoardStatic(c, ambient)
-        if (tab == Tab.CONTROL) drawControlDeckStatic(c, ambient) else drawElectricalDeckStatic(c, ambient)
+        when (tab) {
+            Tab.CONTROL -> drawControlDeckStatic(c, ambient)
+            Tab.ENGINE -> drawEngineDeckStatic(c, ambient)
+            Tab.ELECTRICAL -> drawElectricalDeckStatic(c, ambient)
+        }
         drawAnnunciatorStatic(c, ambient)
         return bmp
     }
@@ -195,9 +203,46 @@ class PanelRenderer(val L: Layout) {
         Theme.screw(c, r.left + 14f, r.bottom - 14f, 6f, 100f)
     }
 
+    private fun drawEngineDeckStatic(c: Canvas, ambient: Float) {
+        c.drawRect(L.deck, Theme.solid(Theme.dim(Theme.PANEL_DARK, ambient)))
+        subPanel(c, L.cylinderPanel, "CYLINDERS 1-6   EXHAUST, DEG. CENT.", ambient)
+        subPanel(c, L.tankPanel, "FUEL, WATER AND OIL", ambient)
+
+        // the common pyrometer scale down the left of the cylinder panel
+        val p0 = L.pyrometer(0)
+        val gutter = L.cylinderPanel.left + L.w * 0.068f
+        Theme.engrave(
+            c, "FEEDS", gutter, L.sightFeedAt(0).y + L.sightFeedR * 0.22f, L.sightFeedR * 0.40f,
+            Theme.dim(Theme.MARK_SOFT, ambient), Paint.Align.RIGHT
+        )
+        Theme.engrave(
+            c, "IGNITERS", gutter, L.igniterSwitch(0).centerY(), L.sightFeedR * 0.40f,
+            Theme.dim(Theme.MARK_SOFT, ambient), Paint.Align.RIGHT
+        )
+        for (i in 0..4) {
+            val frac = i / 4f
+            val y = p0.bottom - p0.height() * frac
+            val degrees = (frac * 800f).toInt()
+            Theme.engrave(
+                c, "$degrees", gutter, y + p0.height() * 0.022f,
+                p0.height() * 0.070f, Theme.dim(Theme.MARK_SOFT, ambient), Paint.Align.RIGHT
+            )
+            c.drawLine(
+                gutter + L.w * 0.006f, y, L.cylinderPanel.right - L.w * 0.014f, y,
+                Theme.line(Theme.withAlpha(Theme.NICKEL, (if (i == 0 || i == 4) 46 else 22)), 1.4f)
+            )
+        }
+    }
+
     private fun drawElectricalDeckStatic(c: Canvas, ambient: Float) {
         val r = RectF(L.w * 0.012f, L.deck.top + 4f, L.w * 0.988f, L.deck.bottom - 4f)
         Theme.panelPlate(c, r, 8f, 0.7f, pinstripe = false)
+        Theme.boardPanel(c, L.relayPlate, seed = 5)
+        Theme.engrave(
+            c, "PROTECTIVE RELAYS", L.relayPlate.left + L.w * 0.018f,
+            L.relayPlate.top + L.relayPlate.height() * 0.225f, L.relayPlate.height() * 0.185f,
+            Theme.dim(Theme.MARK_SOFT, ambient), Paint.Align.LEFT
+        )
         Theme.boardPanel(c, L.boardPlate)
         Theme.screw(c, L.boardPlate.left + 16f, L.boardPlate.top + 16f, 8f)
         Theme.screw(c, L.boardPlate.right - 16f, L.boardPlate.top + 16f, 8f, 70f)
@@ -252,11 +297,14 @@ class PanelRenderer(val L: Layout) {
 
         drawHeaderLive(c, p, ambient)
         drawGaugesLive(c, p, ambient, now)
-        if (tab == Tab.CONTROL) {
-            drawControlLive(c, p, ambient, pressed)
-        } else {
-            Mimic.draw(c, L.mimic, p, ambient, (now % 100000L) / 1000f)
-            drawSwitchboardLive(c, p, ambient)
+        when (tab) {
+            Tab.CONTROL -> drawControlLive(c, p, ambient, pressed)
+            Tab.ENGINE -> { drawEngineLive(c, p, ambient, pressed); drawTanksLive(c, p, ambient, pressed) }
+            Tab.ELECTRICAL -> {
+                Mimic.draw(c, L.mimic, p, ambient, (now % 100000L) / 1000f)
+                drawRelaysLive(c, p, ambient, now)
+                drawSwitchboardLive(c, p, ambient)
+            }
         }
         drawTabBar(c, p, ambient, tab)
         drawAnnunciatorLive(c, p, ambient, now)
@@ -300,17 +348,24 @@ class PanelRenderer(val L: Layout) {
         }
 
         // A small warning pip on whichever deck is not showing but wants attention.
-        val other = if (tab == Tab.CONTROL) Tab.ELECTRICAL else Tab.CONTROL
-        val wants = if (other == Tab.CONTROL) {
-            p.engine.oilFilm < 0.5 || p.engine.jacketTempC > 105 || p.rpm > Spec.OVERSPEED_RPM
-        } else {
-            p.service.loads.any { it.fuseBlown } || p.service.overloaded ||
-                p.mainBus.loads.any { it.fuseBlown } || p.mainBus.overloaded ||
-                p.outputKw < -4.0 || abs(p.outputKw - p.grid.dispatchKw()) > 14.0
-        }
-        if (wants) {
-            val r = L.tabRect(other.ordinal)
-            Theme.lamp(c, r.right - r.height() * 0.42f, r.centerY(), r.height() * 0.16f, Theme.LAMP_RED, 1f)
+        for (other in Tab.entries) {
+            if (other == tab) continue
+            val wants = when (other) {
+                Tab.CONTROL ->
+                    p.engine.oilFilm < 0.5 || p.engine.jacketTempC > 105 || p.rpm > Spec.OVERSPEED_RPM
+                Tab.ENGINE ->
+                    p.aux.fuelStarved || p.aux.dayTankL < 60.0 || p.aux.headerL < 120.0 ||
+                        p.aux.sumpL < 18.0 || (p.running && p.engine.cylinders.count { it.dead } in 1..5)
+                Tab.ELECTRICAL ->
+                    p.protection.anyTarget || p.protection.relays.any { it.travel > 0.35 } ||
+                        p.service.loads.any { it.fuseBlown } || p.service.overloaded ||
+                        p.mainBus.loads.any { it.fuseBlown } || p.mainBus.overloaded ||
+                        p.outputKw < -4.0 || abs(p.outputKw - p.grid.dispatchKw()) > 14.0
+            }
+            if (wants) {
+                val r = L.tabRect(other.ordinal)
+                Theme.lamp(c, r.right - r.height() * 0.36f, r.centerY(), r.height() * 0.15f, Theme.LAMP_RED, 1f)
+            }
         }
     }
 
@@ -461,6 +516,17 @@ class PanelRenderer(val L: Layout) {
             p.genVolts > Spec.RATED_VOLTS * 0.5
         )
 
+        Widgets.knifeSwitch(
+            c, L.stationTxBreaker, if (p.ctl.stationTxBreakerClosed) 1f else 0f, "STN TX",
+            "%.0f%%".format(p.stationTransformerPu() * 100.0), ambient,
+            live = p.mainBus.volts > 0.05
+        )
+        Widgets.knifeSwitch(
+            c, L.startingTxBreaker, if (p.ctl.startingTxBreakerClosed) 1f else 0f, "START TX",
+            if (p.ctl.startingTxBreakerClosed) "GRID TAP" else "LOCKED", ambient,
+            live = p.ctl.startingTxBreakerClosed && p.grid.volts > Spec.RATED_VOLTS * 0.45
+        )
+
         // --- the main bus: the regular controls and pumps ---
         rowCaption(
             c, L.mainRowLabel,
@@ -494,12 +560,97 @@ class PanelRenderer(val L: Layout) {
             "%.0f%%".format(p.engine.batteryCharge * 100.0), ambient,
             live = p.ctl.batteryBreakerClosed && p.engine.batteryCharge > 0.02
         )
+        Widgets.knifeSwitch(
+            c, L.fieldSwitch, if (p.ctl.fieldSwitchClosed) 1f else 0f, "FIELD",
+            if (p.fieldInsulation > 0.02) "INSUL %.0f%%".format((1.0 - p.fieldInsulation) * 100.0) else "DISCH", ambient,
+            live = p.gen.fieldFlux > 0.05
+        )
         for (i in L.auxSwitches.indices) {
             val l = p.service.loads[i]
             Widgets.knifeSwitch(
                 c, L.auxSwitches[i], if (p.ctl.auxClosed[i]) 1f else 0f, l.shortName,
                 if (l.fuseBlown) "FUSE OUT" else "%.1f kW".format(l.kw), ambient,
                 blown = l.fuseBlown, live = l.running
+            )
+        }
+    }
+
+    // ------------------------------------------------------------------ engine deck
+
+    private fun drawEngineLive(c: Canvas, p: Plant, ambient: Float, pressed: Set<String>) {
+        for ((i, cyl) in p.engine.cylinders.withIndex()) {
+            val bar = L.pyrometer(i)
+            val frac = (cyl.exhaustC / 800.0).toFloat().coerceIn(0f, 1f)
+            // The bar runs cool amber to hot orange, and a dead pot reads cold,
+            // which is the whole reason the pyrometer is on the board.
+            val hot = cyl.exhaustC > 610.0
+            val col = when {
+                hot -> Theme.DANGER
+                cyl.cutOut || cyl.dead -> Theme.ACCENT_COOL
+                else -> Theme.ACCENT
+            }
+            Instruments.columnGauge(c, bar, frac, Theme.dim(col, ambient), ambient)
+            Theme.engrave(
+                c, "%.0f".format(cyl.exhaustC), bar.centerX(), bar.top - bar.height() * 0.030f,
+                bar.width() * 0.42f, Theme.dim(if (hot) Theme.DANGER else Theme.MARK_SOFT, ambient)
+            )
+
+            val sf = L.sightFeedAt(i)
+            Instruments.sightFeed(
+                c, sf.x, sf.y, L.sightFeedR, p.ctl.sightFeed[i].toFloat(),
+                cyl.oilFilm.toFloat(), ambient
+            )
+
+            Widgets.toggleLever(
+                c, L.igniterSwitch(i), if (cyl.cutOut) 0f else 1f,
+                "No. ${cyl.number}", "IN", "OUT", ambient
+            )
+        }
+    }
+
+    private fun drawTanksLive(c: Canvas, p: Plant, ambient: Float, pressed: Set<String>) {
+        val a = p.aux
+        val glasses = listOf(
+            Triple("FUEL  DAY", (a.dayTankL / Auxiliaries.DAY_TANK_CAP_L).toFloat(), a.dayTankL),
+            Triple("JACKET  HEADER", (a.headerL / Auxiliaries.HEADER_CAP_L).toFloat(), a.headerL),
+            Triple("OIL  SUMP", (a.sumpL / Auxiliaries.SUMP_CAP_L).toFloat(), a.sumpL)
+        )
+        for ((i, g) in glasses.withIndex()) {
+            val r = L.tankGlass(i)
+            Instruments.gaugeGlass(c, r, g.second, g.first, "%.0f L".format(g.third), ambient)
+        }
+        Widgets.barMeter(
+            c, L.mainTankBar, (a.mainTankL / Auxiliaries.MAIN_TANK_CAP_L).toFloat(),
+            "MAIN TANK  %.0f L".format(a.mainTankL), ambient, warnBelow = 0.10f
+        )
+        Widgets.toggleLever(
+            c, L.fuelCock, if (p.ctl.fuelCock) 1f else 0f,
+            if (a.fuelStarved) "FUEL COCK   STARVED" else "FUEL COCK", "OPEN", "SHUT", ambient
+        )
+        Widgets.toggleLever(
+            c, L.fuelTransfer, if (p.ctl.fuelTransfer) 1f else 0f,
+            if (a.transferPumpRunning && p.ctl.fuelTransfer) "TRANSFER   PUMPING" else "TRANSFER",
+            "ON", "OFF", ambient
+        )
+        Widgets.pushButton(
+            c, L.oilReplenish.x, L.oilReplenish.y, L.oilReplenishR,
+            pressed.contains("oilfill"), "OIL PUMP", ambient
+        )
+        Widgets.handwheel(
+            c, L.makeUpWheel.x, L.makeUpWheel.y, L.makeUpWheelR, p.ctl.makeUpValve.toFloat(),
+            "MAKE-UP", ambient
+        )
+    }
+
+    // ------------------------------------------------------------------ relays
+
+    private fun drawRelaysLive(c: Canvas, p: Plant, ambient: Float, now: Long) {
+        val flash = if ((now / 300L) % 2L == 0L) 1f else 0.45f
+        val n = p.protection.relays.size
+        for ((i, r) in p.protection.relays.withIndex()) {
+            Instruments.relayTarget(
+                c, L.relayWindow(i, n), r.device, r.shortName,
+                r.target, r.pickedUp, r.travel.toFloat(), flash, ambient
             )
         }
     }
@@ -515,20 +666,33 @@ class PanelRenderer(val L: Layout) {
     private fun drawAnnunciatorLive(c: Canvas, p: Plant, ambient: Float, now: Long) {
         val e = p.engine
         val flash = if ((now / 260L) % 2L == 0L) 1f else 0.30f
+        val worstFilm = e.cylinders.minOf { it.oilFilm }
+        // A pot that has quit while the others are firing: the operator's cue to
+        // go and read the pyrometer.
+        val running = p.running
+        val misfiring = running && e.cylinders.count { it.dead } in 1..5
         val states = floatArrayOf(
             if (p.rpm > Spec.OVERSPEED_RPM) flash else if (p.rpm > Spec.RATED_RPM * 1.10) 0.55f else 0f,
-            if (e.oilFilm < 0.35) flash else if (e.oilFilm < 0.60) 0.55f else 0f,
+            if (worstFilm < 0.35) flash else if (worstFilm < 0.60) 0.55f else 0f,
             if (e.jacketTempC > 112) flash else if (e.jacketTempC > 98) 0.55f else 0f,
             if (e.knockIndex > 0.45) flash else if (e.knockIndex > 0.22) 0.55f else 0f,
-            if (p.outputKw < -4.0) flash else 0f,
-            if (!p.service.isRunning(Service.EXCITATION) || p.gen.fieldFlux < 0.04) 0.65f else 0f,
+            if (misfiring) flash else 0f,
+            if (!p.ctl.fieldSwitchClosed || !p.service.isRunning(Service.EXCITATION) ||
+                p.gen.fieldFlux < 0.04) 0.65f else 0f,
             if (p.service.loads.any { it.fuseBlown } || p.service.overloaded ||
                 p.mainBus.loads.any { it.fuseBlown } || p.mainBus.overloaded) flash else 0f,
-            if (e.batteryCharge < 0.12) flash else if (e.batteryCharge < 0.30) 0.55f else 0f
+            if (e.batteryCharge < 0.12) flash else if (e.batteryCharge < 0.30) 0.55f else 0f,
+            if (p.aux.fuelStarved) flash else if (p.aux.dayTankL < 60.0) 0.55f else 0f,
+            if (p.aux.coolantAvailable() < 0.4) flash else if (p.aux.headerL < 120.0) 0.55f else 0f,
+            if (p.protection.anyTarget) flash else if (p.protection.relays.any { it.travel > 0.25 }) 0.55f else 0f
         )
         for (i in states.indices) {
             val pos = L.alarmPos(i, states.size)
-            val col = if (i == 5) Theme.LAMP_AMBER else Theme.LAMP_RED
+            val col = when (i) {
+                5 -> Theme.LAMP_AMBER
+                4, 8 -> Theme.LAMP_AMBER
+                else -> Theme.LAMP_RED
+            }
             Theme.lamp(c, pos.x, pos.y, L.alarmR, col, states[i])
         }
     }

@@ -70,12 +70,59 @@ class Controls {
     // --- auxiliaries ---
     /** 0..1 cooling water gate valve. */
     var waterValve: Double = 0.35
-    /** 0..1 mechanical lubricator drip rate. */
+    /** 0..1 master stroke on the mechanical lubricator, behind the sight feeds. */
     var oilerRate: Double = 0.45
+
+    /**
+     * The six sight feeds off the lubricator, one per cylinder. Half is the
+     * nominal setting the day man leaves them at; a cylinder that is running dry
+     * or fouling wants its own feed trimmed rather than the master opened up.
+     */
+    val sightFeed = DoubleArray(Spec.CYLINDERS) { 0.5 }
+
+    /**
+     * Igniter cut-out switches, one per cylinder. Shorting one out kills that
+     * pot, which is how you prove which one is misbehaving — and how you nurse
+     * a bad cylinder rather than let it hammer the bottom end.
+     */
+    val igniterCutOut = BooleanArray(Spec.CYLINDERS) { false }
+
+    // --- the tanks ---
+    /** The fuel cock between the day tank and the carburettor. Shut it to stop. */
+    var fuelCock: Boolean = true
+    /** Runs the transfer pump, lifting fuel from the buried tank to the day tank. */
+    var fuelTransfer: Boolean = false
+    /** 0..1 make-up valve off the town main into the jacket water header. */
+    var makeUpValve: Double = 0.0
+    /** The hand pump on the oil drum. Momentary. */
+    var oilReplenish: Boolean = false
 
     // --- switchboard: the plant's own internal supplies ---
     /** The unit breaker, between the main transformer and the grid. */
     var mainBreakerClosed: Boolean = false
+    /**
+     * The station transformer breaker, between the generator terminals and the
+     * transformer that feeds the main bus. Opening it drops the whole main bus
+     * without touching the machine's excitation.
+     */
+    var stationTxBreakerClosed: Boolean = true
+
+    /**
+     * The starting transformer breaker, up on the system section of the high
+     * tension bar. Open it and the `GRID` position of the selector has nothing
+     * behind it — which is the correct thing to do once you are running on your
+     * own, and a bad surprise if you forget you did it.
+     */
+    var startingTxBreakerClosed: Boolean = true
+
+    /**
+     * The field switch, with its discharge resistor. Opening it kills the field
+     * through the resistor, which is the safe way; closing it with the rheostat
+     * anywhere but at the bottom throws the whole field on at once, and the
+     * insulation does not forgive that many times.
+     */
+    var fieldSwitchClosed: Boolean = true
+
     /**
      * The emergency transformer breaker, in the run from the generator terminals
      * to the emergency transformer. That transformer is what puts charge back
@@ -94,7 +141,7 @@ class Controls {
      * handover — the main bus is dead until the machine makes volts, so there is
      * nothing to be gained by leaving them out.
      */
-    val mainClosed = booleanArrayOf(true, true, true, true)
+    val mainClosed = booleanArrayOf(true, true, true, true, true)
 
     /**
      * The loads on the emergency line, in the order they sit on the board:

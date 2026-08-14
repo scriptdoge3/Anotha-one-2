@@ -40,7 +40,10 @@ object Mimic {
     private const val GEN_Y = 0.470f
 
     private const val STATION_TX_X = 0.215f
-    private const val STATION_TX_Y = 0.455f
+    private const val STATION_BKR_Y = 0.405f
+    private const val STATION_TX_Y = 0.478f
+    private const val START_BKR_Y = 0.170f
+    private const val FIELD_X = 0.470f
     private const val MAIN_BUS_Y = 0.560f
     private const val MAIN_LOAD_Y = 0.680f
     private const val GEN_TAP_X = 0.705f
@@ -125,11 +128,15 @@ object Mimic {
         // the station transformer. Dead until the machine is making volts.
         val stx = x(STATION_TX_X)
         val mainLive = p.mainBus.volts > 0.05
+        val stnClosed = p.ctl.stationTxBreakerClosed
         val stationCol = level(Theme.AC_LIVE, Theme.AC_DEAD, mainLive, ambient)
-        run(c, stx, y(GEN_BUS_Y), stx, y(STATION_TX_Y) - u * 1.15f, u * 0.62f, ac, genLive, phase, 0.4f, ambient)
-        transformer(c, stx, y(STATION_TX_Y), u * 1.15f, stationCol, ambient)
-        Theme.miniPlate(c, stx + u * 4.6f, y(STATION_TX_Y), "STATION TX", u * 0.56f, ambient)
-        run(c, stx, y(STATION_TX_Y) + u * 1.15f, stx, y(MAIN_BUS_Y), u * 0.62f, stationCol, mainLive, phase, 0.4f, ambient)
+        run(c, stx, y(GEN_BUS_Y), stx, y(STATION_BKR_Y) - u * 0.95f, u * 0.62f, ac, genLive, phase, 0.4f, ambient)
+        device(c, stx, y(STATION_BKR_Y), u * 0.92f, stnClosed, ac, ambient)
+        Theme.miniPlate(c, stx + u * 4.6f, y(STATION_BKR_Y), "STN TX BREAKER", u * 0.54f, ambient)
+        run(c, stx, y(STATION_BKR_Y) + u * 0.95f, stx, y(STATION_TX_Y) - u * 1.0f, u * 0.62f, stationCol, mainLive, phase, 0.4f, ambient)
+        transformer(c, stx, y(STATION_TX_Y), u * 1.0f, stationCol, ambient)
+        Theme.miniPlate(c, stx + u * 4.6f, y(STATION_TX_Y), "STATION TX", u * 0.54f, ambient)
+        run(c, stx, y(STATION_TX_Y) + u * 1.0f, stx, y(MAIN_BUS_Y), u * 0.62f, stationCol, mainLive, phase, 0.4f, ambient)
 
         bar(c, x(0.160f), x(0.415f), y(MAIN_BUS_Y), u * 0.85f, stationCol, mainLive, phase, 0.4f, ambient)
         Theme.miniPlate(c, x(0.400f), y(MAIN_BUS_Y) - u * 1.5f, "MAIN BUS", u * 0.60f, ambient)
@@ -202,13 +209,31 @@ object Mimic {
 
         // the grid's tap, down through the starting transformer
         val sx = x(START_X)
-        run(c, sx, y(BUS_Y), sx, y(START_TX_Y) - u * 1.15f, u * 0.62f, hv, gridLive, phase, 0.4f, ambient)
+        val startClosed = p.ctl.startingTxBreakerClosed
+        run(c, sx, y(BUS_Y), sx, y(START_BKR_Y) - u * 0.95f, u * 0.62f, hv, gridLive, phase, 0.4f, ambient)
+        device(c, sx, y(START_BKR_Y), u * 0.92f, startClosed, hv, ambient)
+        Theme.miniPlate(c, sx - u * 5.4f, y(START_BKR_Y), "START TX BKR", u * 0.54f, ambient)
+        val startTapLive = gridLive && startClosed
+        val startFeed = level(Theme.HV_LIVE, Theme.HV_DEAD, startTapLive, ambient)
+        run(c, sx, y(START_BKR_Y) + u * 0.95f, sx, y(START_TX_Y) - u * 1.15f, u * 0.62f, startFeed, startTapLive, phase, 0.4f, ambient)
         val startCol = level(Theme.AC_LIVE, Theme.AC_DEAD, gridService, ambient)
         transformer(c, sx, y(START_TX_Y), u * 1.15f, startCol, ambient)
         Theme.miniPlate(c, sx - u * 5.2f, y(START_TX_Y), "STARTING TX", u * 0.56f, ambient)
         run(c, sx, y(START_TX_Y) + u * 1.15f, sx, y(LINE_Y) - u * 2.15f, u * 0.62f, startCol, gridService, phase, 0.4f, ambient)
         tap(c, sx, y(LINE_Y) - u * 1.35f, u * 0.78f, gridService, startCol, ambient)
         run(c, sx, y(LINE_Y) - u * 0.57f, sx, y(LINE_Y), u * 0.62f, startCol, gridService, phase, 0.4f, ambient)
+
+        // The field circuit hangs off the line through its own switch, in series
+        // with the excitation load switch on the board. The discharge resistor
+        // beside it is what takes the current when you open it.
+        val fx = x(FIELD_X)
+        val fieldClosed = p.ctl.fieldSwitchClosed
+        val fieldAlive = fieldClosed && p.gen.fieldFlux > 0.03
+        val fieldCol = level(Theme.DC_LIVE, Theme.DC_DEAD, fieldAlive, ambient)
+        run(c, fx, y(LINE_Y), fx, y(LOAD_Y) - u * 1.9f, u * 0.55f, fieldCol, fieldAlive, phase, 0.4f, ambient)
+        device(c, fx, y(LOAD_Y) - u * 1.25f, u * 0.66f, fieldClosed, fieldCol, ambient)
+        resistor(c, fx + u * 1.9f, y(LOAD_Y) - u * 1.25f, u * 0.60f, fieldCol, ambient)
+        Theme.miniPlate(c, fx + u * 0.9f, y(LOAD_Y) + u * 1.25f, "FIELD SW", u * 0.52f, ambient)
 
         // ================= the loads on the emergency line =====================
         for (i in p.service.loads.indices) {
@@ -380,6 +405,21 @@ object Mimic {
             )
         )
         c.drawRoundRect(bar, bar.height() / 2, bar.height() / 2, Theme.line(Theme.withAlpha(Theme.NICKEL, 90), 1.4f))
+    }
+
+    /** The discharge resistor beside the field switch: a zig-zag on a stub. */
+    private fun resistor(c: Canvas, cx: Float, cy: Float, r: Float, color: Int, ambient: Float) {
+        val p = Path()
+        p.moveTo(cx, cy - r * 1.3f)
+        var y = cy - r * 0.9f
+        var side = 1f
+        while (y < cy + r * 0.9f) {
+            p.lineTo(cx + side * r * 0.55f, y)
+            y += r * 0.45f
+            side = -side
+        }
+        p.lineTo(cx, cy + r * 1.3f)
+        c.drawPath(p, Theme.line(color, r * 0.34f))
     }
 
     /** The single-line symbol for a fuse. */

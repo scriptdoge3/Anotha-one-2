@@ -5,6 +5,8 @@ import android.view.MotionEvent
 import androidx.test.core.app.ApplicationProvider
 import com.dynamo.powerplant.game.GameView
 import com.dynamo.powerplant.sim.IgnitionMode
+import com.dynamo.powerplant.sim.Protection
+import com.dynamo.powerplant.sim.Spec
 import com.dynamo.powerplant.ui.Layout
 import com.dynamo.powerplant.ui.Tab
 import org.junit.Assert.assertEquals
@@ -256,4 +258,117 @@ class ControlsTouchTest {
         assertEquals(IgnitionMode.OFF, p.ctl.ignition)
         assertEquals(0.0, p.rpm, 1e-9)
     }
+
+    // ------------------------------------------------------------------ engine deck
+
+    @Test
+    fun everyCylinderHasItsOwnFeedAndItsOwnCutOut() {
+        val p = view.plant
+        showTab(Tab.ENGINE)
+
+        for (i in 0 until Spec.CYLINDERS) {
+            val before = p.ctl.igniterCutOut[i]
+            val sw = L.igniterSwitch(i)
+            tap(sw.centerX(), sw.centerY())
+            assertNotEquals("igniter $i must cut out", before, p.ctl.igniterCutOut[i])
+            // and nothing else may have moved with it
+            for (j in 0 until Spec.CYLINDERS) {
+                if (j != i) assertEquals("cylinder $j must be untouched", false, p.ctl.igniterCutOut[j])
+            }
+            tap(sw.centerX(), sw.centerY())
+        }
+
+        for (i in 0 until Spec.CYLINDERS) {
+            val at = L.sightFeedAt(i)
+            val snapshot = p.ctl.sightFeed.copyOf()
+            drag(at.x, at.y, at.x, at.y - L.sightFeedR * 3.0f)
+            assertTrue(
+                "sight feed $i must open, was ${snapshot[i]} now ${p.ctl.sightFeed[i]}",
+                p.ctl.sightFeed[i] > snapshot[i]
+            )
+            for (j in 0 until Spec.CYLINDERS) {
+                if (j != i) assertEquals("feed $j must be untouched", snapshot[j], p.ctl.sightFeed[j], 1e-9)
+            }
+            p.ctl.sightFeed[i] = snapshot[i]
+        }
+    }
+
+    @Test
+    fun theTankControlsRespondToTaps() {
+        val p = view.plant
+        showTab(Tab.ENGINE)
+
+        val cockBefore = p.ctl.fuelCock
+        tap(L.fuelCock.centerX(), L.fuelCock.centerY())
+        assertNotEquals("the fuel cock must move", cockBefore, p.ctl.fuelCock)
+
+        val transferBefore = p.ctl.fuelTransfer
+        tap(L.fuelTransfer.centerX(), L.fuelTransfer.centerY())
+        assertNotEquals("the transfer switch must move", transferBefore, p.ctl.fuelTransfer)
+
+        val makeUpBefore = p.ctl.makeUpValve
+        drag(L.makeUpWheel.x, L.makeUpWheel.y, L.makeUpWheel.x, L.makeUpWheel.y - L.makeUpWheelR * 3f)
+        assertTrue("the make-up valve must open", p.ctl.makeUpValve > makeUpBefore)
+
+        // The oil hand pump is momentary: held down and released.
+        send(MotionEvent.ACTION_DOWN, L.oilReplenish.x, L.oilReplenish.y)
+        assertTrue("the hand pump must be pumping while held", p.ctl.oilReplenish)
+        send(MotionEvent.ACTION_UP, L.oilReplenish.x, L.oilReplenish.y)
+        assertTrue("and stop when let go", !p.ctl.oilReplenish)
+    }
+
+    // ------------------------------------------------------------------ new switchgear
+
+    @Test
+    fun theNewBreakersRespondToTaps() {
+        val p = view.plant
+        showTab(Tab.ELECTRICAL)
+
+        val stn = p.ctl.stationTxBreakerClosed
+        tap(L.stationTxBreaker.centerX(), L.stationTxBreaker.centerY())
+        assertNotEquals("the station transformer breaker must throw", stn, p.ctl.stationTxBreakerClosed)
+
+        val start = p.ctl.startingTxBreakerClosed
+        tap(L.startingTxBreaker.centerX(), L.startingTxBreaker.centerY())
+        assertNotEquals("the starting transformer breaker must throw", start, p.ctl.startingTxBreakerClosed)
+
+        val field = p.ctl.fieldSwitchClosed
+        tap(L.fieldSwitch.centerX(), L.fieldSwitch.centerY())
+        assertNotEquals("the field switch must throw", field, p.ctl.fieldSwitchClosed)
+    }
+
+    @Test
+    fun tappingATargetResetsIt() {
+        val p = view.plant
+        showTab(Tab.ELECTRICAL)
+
+        // Drop one by hand, the way the relay would.
+        p.protection.step(1.0 / 60.0, true, 0.0, Protection.DIFFERENTIAL_PU + 0.5, 0.6, 60.0)
+        assertTrue("expected a dropped target", p.protection.differential.target)
+
+        val n = p.protection.relays.size
+        val i = p.protection.relays.indexOf(p.protection.differential)
+        val w = L.relayWindow(i, n)
+        tap(w.centerX(), w.centerY())
+        assertTrue("tapping the window must put the target back", !p.protection.differential.target)
+    }
+
+    @Test
+    fun theEngineDeckOnlyAnswersWhileItIsShowing() {
+        val p = view.plant
+
+        // A cylinder cut-out must not be reachable from the control deck, even
+        // though the coordinates overlap the throttle quadrant.
+        showTab(Tab.CONTROL)
+        val sw = L.igniterSwitch(0)
+        tap(sw.centerX(), sw.centerY())
+        assertEquals("the engine deck must be deaf while CONTROL shows", false, p.ctl.igniterCutOut[0])
+
+        showTab(Tab.ENGINE)
+        val before = p.ctl.throttle
+        drag(L.throttleLever.centerX(), L.throttleLever.centerY(),
+             L.throttleLever.centerX(), L.throttleLever.top)
+        assertEquals("the control deck must be deaf while ENGINE shows", before, p.ctl.throttle, 1e-9)
+    }
+
 }

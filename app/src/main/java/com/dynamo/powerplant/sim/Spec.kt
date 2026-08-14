@@ -20,8 +20,9 @@ object Spec {
     /** Peak indicated torque at wide-open throttle under ideal conditions, N*m. */
     const val PEAK_TORQUE = 8600.0
 
-    /** Cylinders firing per crankshaft revolution. */
-    const val FIRINGS_PER_REV = 1.0
+    /** Six cylinders, four stroke: three power strokes per crankshaft revolution. */
+    const val CYLINDERS = 6
+    const val FIRINGS_PER_REV = 3.0
 
     /** Synchronous reactance in per-unit. Sets the pull-out power and tie stiffness. */
     const val XS_PU = 0.95
@@ -35,6 +36,9 @@ object Spec {
     const val BURST_RPM = 940.0
     const val SEIZE_BEARING_C = 205.0
     const val SEIZE_JACKET_C = 132.0
+
+    /** Full load stator current, amperes, three phase. */
+    val RATED_AMPS: Double get() = RATED_KW * 1000.0 / (RATED_VOLTS * 1.7320508)
 
     fun rpmToHz(rpm: Double) = rpm / 10.0
     fun hzToRpm(hz: Double) = hz * 10.0

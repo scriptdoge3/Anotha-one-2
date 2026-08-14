@@ -1,10 +1,12 @@
 package com.dynamo.powerplant
 
+import com.dynamo.powerplant.sim.Auxiliaries
 import com.dynamo.powerplant.sim.Controls
 import com.dynamo.powerplant.sim.Engine
 import com.dynamo.powerplant.sim.Failure
 import com.dynamo.powerplant.sim.IgnitionMode
 import com.dynamo.powerplant.sim.Plant
+import com.dynamo.powerplant.sim.Protection
 import com.dynamo.powerplant.sim.Service
 import com.dynamo.powerplant.sim.Spec
 import org.junit.Assert.assertEquals
@@ -616,4 +618,347 @@ class SimTest {
         assertTrue("lamps must go dark at coincidence, min was $minB", minB < 0.12)
         assertTrue("lamps must burn bright at opposition, max was $maxB", maxB > 0.7)
     }
+
+    // ------------------------------------------------------------------ protection
+
+    /** Get on the bars and settle at roughly the order. */
+    private fun onLoad(p: Plant, seconds: Double = 45.0): Boolean {
+        if (!startEngine(p)) return false
+        if (!synchronise(p)) return false
+        run(p, seconds) { pl ->
+            trim(pl)
+            val err = pl.grid.dispatchKw() - pl.outputKw
+            pl.ctl.throttle = (pl.ctl.throttle + err * 0.0012).coerceIn(0.0, 1.0)
+        }
+        return p.ctl.mainBreakerClosed && !p.ended
+    }
+
+    @Test
+    fun reversePowerRelayTripsTheUnitAndDropsItsTarget() {
+        val p = Plant(201)
+        assertTrue(onLoad(p))
+        assertTrue("no target should be dropped yet", !p.protection.anyTarget)
+
+        // Shut the throttle while tied on. The bus keeps the machine turning and
+        // starts driving it as a motor, which is exactly what the 32 is for.
+        run(p, 4.0) { it.ctl.throttle = 0.0; trim(it) }
+        assertTrue("the machine should be motoring, was ${p.outputKw} kW", p.outputKw < Protection.REVERSE_POWER_KW)
+        assertTrue("and the relay should be timing out", p.protection.reversePower.pickedUp)
+
+        run(p, 12.0) { it.ctl.throttle = 0.0; trim(it) }
+        assertTrue("the reverse power relay must operate", p.protection.reversePower.target)
+        assertTrue("and it must trip the unit off the bars", !p.ctl.mainBreakerClosed)
+        assertEquals("a relay trip is not a wreck", Failure.NONE, p.failure)
+        assertEquals(1, p.relayTrips)
+    }
+
+    @Test
+    fun theBreakerIsInterlockedUntilTheTargetIsReset() {
+        val p = Plant(202)
+        assertTrue(onLoad(p))
+        run(p, 32.0) { it.ctl.throttle = 0.0; trim(it) }
+        assertTrue("expected a trip", p.protection.anyTarget)
+
+        // The closing mechanism is held out while the target is down, however
+        // well you have re-matched the machine.
+        p.ctl.throttle = 0.42
+        run(p, 20.0) { tend(it, it.grid.hz + 0.05); matchVolts(it) }
+        p.toggleBreaker()
+        assertTrue("the interlock must hold the breaker out", !p.ctl.mainBreakerClosed)
+        assertTrue("and say so", p.events.interlocked)
+
+        // Reset the target by hand and it will close again.
+        val which = p.protection.relays.indexOfFirst { it.target }
+        p.resetTarget(which)
+        assertTrue("the target must clear", !p.protection.anyTarget)
+        assertTrue("and then it will parallel again", synchronise(p))
+    }
+
+    @Test
+    fun theOvercurrentRelayIsInverseTime() {
+        fun timeToOperate(ampsPu: Double): Double {
+            val pr = Protection()
+            var t = 0.0
+            while (t < 400.0 && !pr.overcurrent.target) {
+                pr.step(1.0 / 60.0, true, 300.0, ampsPu, 0.6, 60.0)
+                t += 1.0 / 60.0
+            }
+            return t
+        }
+        val gentle = timeToOperate(1.25)
+        val hard = timeToOperate(1.90)
+        assertTrue("a small overload must take a while, took $gentle s", gentle > 8.0)
+        assertTrue("a big one must be much quicker, took $hard s", hard < gentle * 0.5)
+        // Inside the setting it must never operate at all.
+        assertTrue("full load is not an overload", timeToOperate(1.00) > 399.0)
+    }
+
+    @Test
+    fun theDifferentialRelayDoesNotWait() {
+        val pr = Protection()
+        pr.step(1.0 / 60.0, true, 300.0, Protection.DIFFERENTIAL_PU + 0.1, 0.6, 60.0)
+        assertTrue("87 is instantaneous", pr.differential.target)
+    }
+
+    @Test
+    fun theFrequencyRelayTakesYouOffWhenTheSystemGoes() {
+        val pr = Protection()
+        var t = 0.0
+        while (t < 10.0 && !pr.underFrequency.target) {
+            pr.step(1.0 / 60.0, true, 300.0, 0.8, 0.6, 56.9)
+            t += 1.0 / 60.0
+        }
+        assertTrue("81 must operate below the limit", pr.underFrequency.target)
+        assertTrue("and take about its time setting, took $t s", t > 3.0 && t < 6.0)
+
+        // Off the bars it watches nothing, because there is nothing to watch.
+        val idle = Protection()
+        repeat(1200) { idle.step(1.0 / 60.0, false, 0.0, 0.0, 0.0, 56.0) }
+        assertTrue("off the bars the relays must stay put", !idle.anyTarget)
+    }
+
+    @Test
+    fun lossOfFieldOnlyCountsWhenTheMachineIsCarryingSomething() {
+        val loaded = Protection()
+        repeat(600) { loaded.step(1.0 / 60.0, true, 300.0, 0.9, 0.05, 60.0) }
+        assertTrue("40 must operate on load", loaded.lossOfField.target)
+
+        val floating = Protection()
+        repeat(600) { floating.step(1.0 / 60.0, true, 2.0, 0.02, 0.05, 60.0) }
+        assertTrue("an idling machine with no field is not a fault", !floating.lossOfField.target)
+    }
+
+    // ------------------------------------------------------------------ cylinders
+
+    @Test
+    fun aCutOutCylinderCostsAboutASixthOfThePower() {
+        val p = Plant(210)
+        assertTrue(startEngine(p))
+        run(p, 20.0) { tend(it) }
+        val before = p.engine.cylinders.sumOf { it.firingSuccess }
+
+        p.ctl.igniterCutOut[3] = true
+        run(p, 20.0) { tend(it) }
+        val after = p.engine.cylinders.sumOf { it.firingSuccess }
+
+        assertTrue("the cut pot must stop firing", p.engine.cylinders[3].firingSuccess < 0.05)
+        assertTrue("the other five must carry on", p.engine.cylinders.count { it.firingSuccess > 0.5 } == 5)
+        val lost = (before - after) / before
+        assertTrue("about a sixth of the fire should be gone, lost $lost", lost > 0.10 && lost < 0.28)
+    }
+
+    @Test
+    fun theExhaustPyrometerFindsTheDeadCylinder() {
+        val p = Plant(211)
+        assertTrue(startEngine(p))
+        run(p, 40.0) { tend(it) }
+        p.ctl.igniterCutOut[1] = true
+        run(p, 60.0) { tend(it) }
+
+        val cold = p.engine.cylinders[1].exhaustC
+        val others = p.engine.cylinders.filterIndexed { i, _ -> i != 1 }.map { it.exhaustC }
+        assertTrue("the cut pot must go cold, read $cold", cold < others.min() * 0.5)
+        assertTrue("and the rest must stay hot, coldest was ${others.min()}", others.min() > 120.0)
+    }
+
+    @Test
+    fun aShutSightFeedScoresItsOwnLinerAndNoOther() {
+        val p = Plant(212)
+        assertTrue(startEngine(p))
+        // Shut one feed right off and open the rest wide, then work it.
+        run(p, 260.0) { pl ->
+            tend(pl)
+            pl.ctl.oilerRate = 1.0
+            for (i in pl.ctl.sightFeed.indices) pl.ctl.sightFeed[i] = if (i == 4) 0.0 else 0.85
+        }
+        val starved = p.engine.cylinders[4]
+        assertTrue("the shut pot must lose its film, was ${starved.oilFilm}", starved.oilFilm < 0.2)
+        assertTrue("and start to pick up, wear ${starved.wear}", starved.wear > 0.05)
+        val healthy = p.engine.cylinders.filterIndexed { i, _ -> i != 4 }
+        assertTrue("the fed pots must be fine", healthy.all { it.oilFilm > 0.75 })
+        assertTrue("and unmarked", healthy.all { it.wear < 0.001 })
+    }
+
+    @Test
+    fun runningOnePotDryEventuallyScoresTheLiner() {
+        val p = Plant(213)
+        assertTrue(startEngine(p))
+        run(p, 1200.0) { pl ->
+            tend(pl)
+            pl.ctl.oilerRate = 0.9
+            for (i in pl.ctl.sightFeed.indices) pl.ctl.sightFeed[i] = if (i == 0) 0.0 else 0.8
+        }
+        assertTrue(
+            "expected a scored liner or a thrown rod, got ${p.failure}",
+            p.failure == Failure.LINER_SCORED || p.failure == Failure.THROWN_ROD
+        )
+    }
+
+    // ------------------------------------------------------------------ the tanks
+
+    @Test
+    fun shuttingTheFuelCockStopsTheEngine() {
+        val p = Plant(220)
+        assertTrue(startEngine(p))
+        p.ctl.fuelCock = false
+        run(p, 12.0) { tend(it) }
+        assertTrue("no fuel, no fire", p.engine.firingSuccess < 0.05)
+        // A flywheel this size takes a minute and a half to run down on its own.
+        run(p, 55.0) { tend(it) }
+        assertTrue("and it must be coasting down hard, rpm ${p.rpm}", p.rpm < 350.0)
+    }
+
+    @Test
+    fun theDayTankRunsDryAndTheTransferPumpFillsItAgain() {
+        val p = Plant(221)
+        assertTrue(startEngine(p))
+        p.aux.dayTankL = 26.0
+        run(p, 40.0) { pl -> tend(pl); pl.ctl.throttle = 0.85 }
+        assertTrue("the gravity tank should be starving it", p.aux.fuelStarved)
+        assertTrue("which shows as a weak fire, was ${p.engine.firingSuccess}", p.engine.firingSuccess < 0.6)
+
+        // The transfer pump is a main bus load, so it needs the main bus alive.
+        val before = p.aux.dayTankL
+        p.ctl.fuelTransfer = true
+        run(p, 60.0) { tend(it) }
+        assertTrue("the pump must lift fuel, ${p.aux.dayTankL} vs $before", p.aux.dayTankL > before + 20.0)
+        assertTrue("and it must come out of the main tank", p.aux.mainTankL < Auxiliaries.MAIN_TANK_CAP_L)
+        assertTrue("the fire should come back", p.engine.firingSuccess > 0.75)
+    }
+
+    @Test
+    fun overfillingTheDayTankSpillsOutOfTheOverflow() {
+        val p = Plant(222)
+        assertTrue(startEngine(p))
+        p.aux.dayTankL = Auxiliaries.DAY_TANK_CAP_L - 2.0
+        p.ctl.fuelTransfer = true
+        run(p, 60.0) { tend(it) }
+        assertTrue("it must go on the floor, spilled ${p.aux.spilledL}", p.aux.spilledL > 5.0)
+        assertTrue("and the tank cannot hold more than it holds", p.aux.dayTankL <= Auxiliaries.DAY_TANK_CAP_L + 1e-6)
+    }
+
+    @Test
+    fun anEmptyHeaderMakesTheGateValveMeaningless() {
+        val p = Plant(223)
+        assertTrue(startEngine(p))
+        p.aux.headerL = 8.0
+        p.ctl.waterValve = 1.0
+        run(p, 4.0) { pl -> trim(pl); pl.ctl.waterValve = 1.0 }
+        assertTrue("nothing to circulate", p.engine.coolantFlowPu < 0.2)
+
+        // The make-up valve off the town main is what puts it back.
+        run(p, 90.0) { pl -> trim(pl); pl.ctl.waterValve = 1.0; pl.ctl.makeUpValve = 1.0 }
+        assertTrue("the header must fill, was ${p.aux.headerL}", p.aux.headerL > 60.0)
+        assertTrue("and the pumps come good again", p.engine.coolantFlowPu > 0.8)
+    }
+
+    @Test
+    fun theJacketBoilsWaterAwayAndTheOutletReadsHotterThanTheIron() {
+        val p = Plant(224)
+        assertTrue(startEngine(p))
+        val before = p.aux.headerL
+        run(p, 300.0) { pl -> tend(pl); pl.ctl.throttle = 0.75 }
+        assertTrue("a hot jacket must lose water, ${p.aux.headerL} from $before", p.aux.headerL < before - 1.0)
+        assertTrue(
+            "the outlet must read above the iron: ${p.aux.jacketOutletC} vs ${p.engine.jacketTempC}",
+            p.aux.jacketOutletC > p.engine.jacketTempC
+        )
+    }
+
+    @Test
+    fun theSumpRunsDownAndTheHandPumpPutsItBack() {
+        val p = Plant(225)
+        assertTrue(startEngine(p))
+        val before = p.aux.sumpL
+        run(p, 400.0) { pl -> tend(pl); pl.ctl.oilerRate = 1.0 }
+        assertTrue("the oiler must use oil, ${p.aux.sumpL} from $before", p.aux.sumpL < before - 1.0)
+
+        val low = p.aux.sumpL
+        run(p, 30.0) { pl -> tend(pl); pl.ctl.oilReplenish = true }
+        assertTrue("the hand pump must put it back, ${p.aux.sumpL} from $low", p.aux.sumpL > low + 3.0)
+    }
+
+    // ------------------------------------------------------------------ new switchgear
+
+    @Test
+    fun theStationTransformerBreakerDropsTheMainBusAndNothingElse() {
+        val p = Plant(230)
+        assertTrue(startEngine(p))
+        assertTrue("the main bus should be alive", p.mainBus.volts > 0.9)
+
+        p.ctl.stationTxBreakerClosed = false
+        run(p, 3.0) { tend(it) }
+        assertTrue("the main bus must go dead", p.mainBus.volts < 0.05)
+        assertTrue("and take the circulating pump with it", !p.mainBus.isRunning(Service.CIRC_PUMP))
+        // The emergency line has its own transformer and does not care.
+        assertTrue("the emergency line must hold up", p.service.volts > 0.8)
+        assertTrue("and the engine keeps running", p.running)
+    }
+
+    @Test
+    fun theStartingTransformerBreakerLocksOutGridSupply() {
+        val p = Plant(231)
+        p.ctl.ignition = IgnitionMode.GRID
+        run(p, 1.0)
+        assertTrue("GRID should be good to start on", p.service.volts > 0.8)
+
+        p.ctl.startingTxBreakerClosed = false
+        run(p, 1.0)
+        assertTrue("with the tap locked out there is nothing there", p.service.volts < 0.05)
+        assertEquals("and no spark", 0.0, p.engine.sparkEnergy(p.ctl, 0.0), 1e-9)
+    }
+
+    @Test
+    fun openingTheFieldSwitchCollapsesTheFieldThroughItsResistor() {
+        val p = Plant(232)
+        assertTrue(startEngine(p))
+        p.ctl.excitation = 0.60
+        run(p, 8.0) { tend(it) }
+        assertTrue("the machine should be excited", p.gen.fieldFlux > 0.4)
+
+        p.toggleFieldSwitch()
+        run(p, 6.0) { tend(it) }
+        assertTrue("the field must go", p.gen.fieldFlux < 0.05)
+        assertTrue("opening it is the safe way and costs nothing", p.fieldInsulation < 1e-9)
+    }
+
+    @Test
+    fun throwingTheFieldSwitchInHotDamagesTheInsulation() {
+        val p = Plant(233)
+        assertTrue(startEngine(p))
+        p.ctl.excitation = 0.75
+        run(p, 6.0) { tend(it) }
+
+        // Out is free; in with the rheostat still up is not.
+        p.toggleFieldSwitch()
+        run(p, 2.0) { tend(it) }
+        val clean = p.fieldInsulation
+        p.toggleFieldSwitch()
+        assertTrue("throwing it in hot must mark the winding", p.fieldInsulation > clean)
+        assertTrue("and it should have said so", p.events.fieldSurge)
+
+        // Do it the right way and it costs nothing further.
+        val marked = p.fieldInsulation
+        p.ctl.excitation = 0.0
+        run(p, 2.0) { tend(it) }
+        p.toggleFieldSwitch()
+        p.toggleFieldSwitch()
+        assertEquals("rheostat at the bottom first is free", marked, p.fieldInsulation, 1e-9)
+    }
+
+    @Test
+    fun enoughHotSwitchingOfTheFieldFlashesItOver() {
+        val p = Plant(234)
+        assertTrue(startEngine(p))
+        p.ctl.excitation = 0.95
+        run(p, 6.0) { tend(it) }
+        var guard = 0
+        while (!p.ended && guard++ < 40) {
+            p.toggleFieldSwitch()   // out
+            p.toggleFieldSwitch()   // and straight back in, hot
+            run(p, 0.5) { tend(it) }
+        }
+        assertEquals("it must let go eventually", Failure.FIELD_FLASHOVER, p.failure)
+    }
+
 }

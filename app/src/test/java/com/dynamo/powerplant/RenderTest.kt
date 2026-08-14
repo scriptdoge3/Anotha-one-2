@@ -151,6 +151,16 @@ class RenderTest {
         }
         shoot("04-on-the-bus", p)
         shoot("06-electrical-tied", p, tab = Tab.ELECTRICAL)
+        shoot("08-engine-tied", p, tab = Tab.ENGINE)
+
+        // and again with a pot cut out and a relay target dropped, so the
+        // diagnostic side of both decks can be looked at
+        p.ctl.igniterCutOut[2] = true
+        p.aux.dayTankL = 42.0
+        p.aux.headerL = 96.0
+        run(p, 25.0) { pl -> trim(pl) }
+        p.protection.resetTarget(p.protection.reversePower)
+        shoot("09-engine-sick", p, tab = Tab.ENGINE)
     }
 
     @Test
