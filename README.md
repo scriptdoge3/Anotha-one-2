@@ -18,7 +18,8 @@ The switchboard is not for the grid. It is for the plant's own internal
 supplies, and there are two of them. The **main bus** carries the regular
 running gear — the control supply, the circulating pump, the oil pump, the house
 lights — and hangs off the generator terminals through the station transformer,
-so it is dead until the machine is turning and excited. The **emergency line**
+so it is alive whenever those terminals are: from your own machine, or from the
+system back-feeding through the starting transformer. The **emergency line**
 carries the four things the set cannot run without — the ignition, the
 excitation, the emergency pump and the emergency lights — and is normally held
 up by the battery.
@@ -89,23 +90,25 @@ bright with current beads sliding along them; dead ones go grey; open contacts
 show as a blade swung clear of its jaws.
 
 ```
-  == UNIT H.T. ==+== UNIT BREAKER ==+========= GRID 2300 V =====
-        |                                              |
-     MAIN TX                                     STARTING TX
-        |                                              |
-  ======+========= GENERATOR TERMINALS ==========       |
-        |        |                    |                |
-     [ GEN ]  STATION TX         EMG TX BREAKER         |
-                 |                    |                |
-  ===== MAIN BUS =====            EMERGENCY TX          |
-   | |  |   |   |                      |                |
-  CTRL | OIL  FUEL LIGHT               +--- BATTERY     |
-     CIRC                              |        |       |
-                                     (GEN)   BATT BKR   |
-                                       |        |       |
-                                       |     (EMG)   (GRID)
-                                       |        |       |
-  ================= EMERGENCY LINE =====+========+=======+==
+  == UNIT H.T. ==+== UNIT BREAKER ==+====== GRID 2300 V ======
+        |                                            |
+     MAIN TX                                  START TX BREAKER
+        |                                            |
+        |                                      STARTING TX
+        |                                            |
+  ======+========= GENERATOR TERMINALS ==============+=======
+        |        |                    |              |
+     [ GEN ]  STN TX BKR         EMG TX BREAKER     (GRID)
+                 |                    |              |
+             STATION TX         EMERGENCY TX         |
+                 |                    |              |
+  ===== MAIN BUS =====                +--- BATTERY   |
+   | |  |   |   |                     |        |     |
+  CTRL | OIL  FUEL LIGHT            (GEN)   BATT BKR |
+     CIRC                             |        |     |
+                                      |     (EMG)    |
+                                      |        |     |
+  ================= EMERGENCY LINE ====+========+=====+==
     |      |       |       |        |
    IGN    EXC   E.PUMP   E.LT   FIELD SW
    0.6    2.2     4.0     1.2
@@ -114,8 +117,22 @@ show as a blade swung clear of its jaws.
 The high tension bar is sectionalised at the unit breaker. The short left
 section is the machine's own — the main transformer up from the generator
 terminals, and nothing else on it. Everything right of the breaker is the
-system, and that is what the starting transformer hangs on, which is why `GRID`
-supply survives having the unit breaker open.
+system, and that is what the starting transformer hangs on.
+
+**The starting transformer is the back-feed road.** Its secondary lands on the
+generator terminals — the orange bar the whole station hangs off. Close its
+breaker on a dead station and the system holds that bar up: the main bus comes
+alive, the circulating pump and the oil pump turn, the lights come on and the
+charging set starts putting the battery back, all before the engine has turned a
+revolution. That is how you bring a cold plant in, and it is why a flat battery
+is a nuisance rather than the end of the shift.
+
+**And it must be opened before you excite.** With its breaker in, your machine's
+terminals are already tied to the system through it. Bring the field up against
+that and you are paralleling the set through a transformer meant for lighting a
+dead station, out of step. It will not hold: its own protection throws it off.
+No damage, but it is a bang, and it is avoidable. Open it, then the field, then
+synchronise properly on the unit breaker.
 
 The mimic is coloured the way a real control room panel is: **red** for the
 high tension side, **orange** for generator voltage and the main bus, **green**
@@ -128,10 +145,11 @@ to the other. Losing the main bus costs you the pumps and the lights; losing the
 emergency line stops the engine.
 
 **The main bus** is fed off the generator terminals through the station
-transformer, and nothing else feeds it. Until the machine is turning and excited
-there is no control supply, no circulating pump, no oil pump and no house
-lights. Getting the field up is therefore part of starting, not part of
-synchronising.
+transformer, and nothing else feeds it. So it is alive exactly when that bar is
+alive: from the system while the starting transformer is in, and from your own
+machine once it is out. Islanded and unexcited there is no control supply, no
+circulating pump, no oil pump and no house lights, which is why getting the
+field up is part of starting rather than part of synchronising.
 
 **The emergency circuit comes straight off the generator terminals too**, on
 its own breaker and its own transformer. That transformer's output does two
@@ -141,10 +159,11 @@ and goes out to the line through the battery breaker.
 
 That is the only road the charge takes back to the cells, so with the emergency
 transformer breaker open the battery is islanded and will only ever run down —
-and an unexcited machine gives its transformer nothing to work on, so the field
-you need for charging comes off the line you are charging. Open the battery
-breaker and the cells are off the line altogether: no battery ignition, and no
-starting motor.
+and an islanded, unexcited machine gives its transformer nothing to work on, so
+the field you need for charging comes off the line you are charging. (With the
+starting transformer in, the system does that job for you, which is how a flat
+battery gets brought back.) Open the battery breaker and the cells are off the
+line altogether: no battery ignition, and no starting motor.
 
 Only one of the three taps into the emergency line is made at a time, and the
 selector is what makes it. Each load has its own switch and fuse on the board.
@@ -252,24 +271,28 @@ One rotary decides what holds the emergency line up:
 
 ```
 GRID --- GEN --- OFF --- EMG
-  |       |               |
-  bus    the machine     the battery
+  |         |             |
+the       the           the
+system    terminals     battery
 ```
 
-- **GRID** — tapped off the grid bus through the starting transformer. Full and
-  steady at any speed, so it will start a stone cold engine. But it fades as the
-  grid volts sag, which means the ignition and the field go weak exactly when
-  the system is in trouble and you most need the machine.
-- **GEN** — the output of the emergency transformer: the machine carrying its
-  own emergency line. Dead until the machine is excited, so it cannot start the
-  engine, and it is the right place to run it because nothing outside the
-  station can take it away. The circle closes on itself: the field is one of the
-  loads on the line that transformer is holding up.
+- **GRID** — off the starting transformer's own secondary, so it is the system
+  and nothing else. Full and steady at any speed, so it will start a stone cold
+  engine. But it fades as the grid volts sag, which means the ignition and the
+  field go weak exactly when the system is in trouble and you most need the
+  machine — and it goes away completely the moment you open the starting
+  transformer breaker, which you have to do before you excite.
+- **GEN** — the output of the emergency transformer, off the generator
+  terminals. Alive whenever *anything* is holding that bar up: the system while
+  the starting transformer is in, and your own machine once it is out. Islanded
+  it is the right place to run, because nothing outside the station can take it
+  away, and the circle closes on itself — the field is one of the loads on the
+  line that transformer is holding up.
 - **OFF** — dead.
 - **EMG** — the battery, through the battery breaker. A fat spark at cranking
   speed that fades as the revolutions rise, and the only position that will turn
-  the starting motor. It also flattens the cells, which are only put back by the
-  emergency transformer, and that wants an excited machine.
+  the starting motor. It flattens the cells, which are put back by the emergency
+  transformer — and that wants the terminals live, from either end.
 
 The layout is the point: `EMG` is where you start and `GEN` is where you run,
 and getting between them means passing through `OFF` with no ignition at all —
@@ -279,8 +302,9 @@ the point where the emergency transformer has anything to work on, so landing on
 
 ## Getting the engine lit, cold
 
-The day man left the board ready: a fast idle on the throttle, a rich needle, a
-retarded spark, the water gate cracked and the lubricator feeding. So the short
+The day man left the board ready: the starting transformer in so the station is
+alive, a fast idle on the throttle, a rich needle, a retarded spark, the water
+gate cracked and the lubricator feeding. So the short
 version is **selector to `EMG`, hold the starter until it catches, let go.**
 
 The longer version, and what each of those settings is for:
@@ -300,10 +324,12 @@ The longer version, and what each of those settings is for:
    will light at all.
 6. **Do not sit on the starter.** The cells also carry the ignition, the field
    and the emergency pump, so emergency supply is a clock.
-7. **Bring the field up once it is lit.** Until the machine is making volts
-   there is no main bus — no circulating pump, no oil pump — and no emergency
-   transformer either, so nothing for the `GEN` tap to carry and nothing putting
-   the cells back. Then sweep the selector across to `GEN`.
+7. **Open the starting transformer breaker, then bring the field up.** In that
+   order, always. With the starting transformer in, the terminals are tied to
+   the system through it and exciting the machine throws it off. Once it is open
+   the station is islanded, and the field is what holds everything up: the main
+   bus and its pumps, the emergency transformer, and the cells. Then sweep the
+   selector across to `GEN`.
 
 Then let the jacket come up to about 78 °C before you ask much of it.
 
@@ -363,6 +389,10 @@ is a bad half hour, not the end of the shift.
 
 **Throwing the breaker open at full load is the fastest way to destroy the
 engine.** There is no governor to catch it. Shut the throttle first.
+
+**So does the starting transformer.** Open its breaker before the field goes up,
+not after. Leaving it in costs you a trip and a re-close, and there is no way to
+synchronise properly with the machine already tied to the system through it.
 
 **The field switch has an order of operations.** Opening it is always safe: the
 discharge resistor beside it takes the field current away gently. Closing it is
