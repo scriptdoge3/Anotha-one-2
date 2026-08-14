@@ -254,6 +254,9 @@ class ControlsTouchTest {
         assertTrue("expected the shift to end", p.ended)
 
         tap(L.throttleLever.centerX(), L.throttleLever.centerY())
+        // The touch queues the reset; the loop is what carries it out, so that
+        // the plant is never torn down underneath a step in progress.
+        view.advance(1.0 / 60.0)
         assertTrue("the board should be reset for another shift", !p.ended)
         assertEquals(IgnitionMode.OFF, p.ctl.ignition)
         assertEquals(0.0, p.rpm, 1e-9)

@@ -448,6 +448,14 @@ running down and being put back.
 graphics, so the panel can be inspected without a device. Output lands in
 `app/build/screens`.
 
+`StressTest` goes after the crash rather than the physics: it thumps the board
+at random across every deck for six thousand frames checking nothing throws and
+no number has gone to NaN, draws every awkward state (wrecked, every switch out,
+every fuse gone, every tank empty), and holds the two threading contracts that
+used to break the game — the cached background must not be recycled while the
+loop is drawing it, and the loop must turn only while there is both a surface
+and a resumed activity.
+
 `ControlsTouchTest` dispatches real touch events at every hand control and
 checks each one moves the thing it is connected to — including working two
 levers at once with two fingers, and that each deck only answers while it is

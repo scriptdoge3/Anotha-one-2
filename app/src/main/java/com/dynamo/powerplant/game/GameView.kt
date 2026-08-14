@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import java.util.concurrent.ConcurrentHashMap
 import com.dynamo.powerplant.audio.EngineAudio
 import com.dynamo.powerplant.sim.IgnitionMode
 import com.dynamo.powerplant.sim.Plant
@@ -25,24 +26,44 @@ import kotlin.math.hypot
 class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback, Runnable {
 
     val plant = Plant()
-    private var layout: Layout? = null
-    private var renderer: PanelRenderer? = null
+    @Volatile private var layout: Layout? = null
+    @Volatile private var renderer: PanelRenderer? = null
     private val audio = EngineAudio()
 
     private var thread: Thread? = null
     @Volatile private var running = false
+    /** The loop only turns when the activity is up and the surface exists. */
+    @Volatile private var resumed = false
+    @Volatile private var hasSurface = false
     private var lastNanos = 0L
 
-    private var scale = 1f
-    private var offX = 0f
-    private var offY = 0f
+    // Written by surfaceChanged on the UI thread, read by the loop on the game
+    // thread and by the touch handler back on the UI thread.
+    @Volatile private var scale = 1f
+    @Volatile private var offX = 0f
+    @Volatile private var offY = 0f
 
     /** Which deck is showing. The instrument board above it is always in view. */
-    var tab: Tab = Tab.CONTROL
+    @Volatile var tab: Tab = Tab.CONTROL
         private set
 
+    /**
+     * Whether the loop is meant to be turning. It turns only while the activity
+     * is resumed and the surface exists, and both of those go away without
+     * warning on a phone.
+     */
+    val loopRunning: Boolean get() = running
+
+    /**
+     * Touches arrive on the UI thread and the plant is stepped on the game
+     * thread, so anything that restructures the world rather than just nudging a
+     * control is queued here and applied by the loop between frames.
+     */
+    @Volatile private var pendingReset = false
+
     private var keyLastMove = 0L
-    private val pressed = HashSet<String>()
+    /** Read by the renderer on the game thread while the UI thread writes it. */
+    private val pressed: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     /** Which control each finger grabbed, and what it was holding when it did. */
     private class Grab(val id: String, val startX: Float, val startY: Float, val startValue: Double)
@@ -55,34 +76,73 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
 
     // ------------------------------------------------------------------ lifecycle
 
-    override fun surfaceCreated(holder: SurfaceHolder) {}
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        hasSurface = true
+        startLoop()
+    }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         val vh = Layout.virtualHeight(width, height)
         val l = Layout(Layout.VIRTUAL_W, vh)
+        val old = renderer
+        // Publish the new one before releasing the old, so the game loop never
+        // holds a reference to a renderer whose bitmap is being recycled.
         layout = l
-        renderer?.release()
         renderer = PanelRenderer(l)
+        old?.release()
         scale = width / Layout.VIRTUAL_W
         offX = 0f
         offY = (height - vh * scale) / 2f
     }
 
-    override fun surfaceDestroyed(holder: SurfaceHolder) {}
+    /**
+     * The contract is that this must not return while the loop is still touching
+     * the surface, so it stops the thread and waits for it. Leaving the loop
+     * running against a destroyed surface is the other way this used to die: the
+     * next `lockCanvas` throws, on the game thread, where nothing catches it.
+     */
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        hasSurface = false
+        stopLoop()
+    }
 
     fun resume() {
-        if (running) return
-        running = true
-        lastNanos = System.nanoTime()
+        resumed = true
         audio.start()
-        thread = Thread(this, "dynamo-room").also { it.start() }
+        startLoop()
     }
 
     fun pause() {
-        running = false
+        resumed = false
+        stopLoop()
         audio.stop()
-        thread?.join(800)
+    }
+
+    /**
+     * Both of these are called only from the UI thread — surface callbacks and
+     * the activity lifecycle — and are synchronised against each other so a
+     * pause racing a surface teardown cannot end up with two loops running.
+     */
+    @Synchronized
+    private fun startLoop() {
+        if (running || !resumed || !hasSurface) return
+        running = true
+        lastNanos = System.nanoTime()
+        thread = Thread(this, "dynamo-room").also { it.start() }
+    }
+
+    @Synchronized
+    private fun stopLoop() {
+        running = false
+        val t = thread ?: return
         thread = null
+        if (t !== Thread.currentThread()) {
+            try {
+                t.join(2000)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
     }
 
     // ------------------------------------------------------------------ loop
@@ -94,24 +154,36 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
             lastNanos = now
             if (dt > 0.20) dt = 0.20
 
-            plant.step(dt)
-            audio.update(plant, dt)
+            advance(dt)
 
+            // Taking and giving back the canvas is guarded, because the surface
+            // can be torn down by the system between the check and the call and
+            // there is nothing to be done about that but skip the frame. The
+            // drawing itself is not guarded: a fault in there is a real bug and
+            // should be heard about rather than swallowed.
             val h = holder
-            if (h.surface.isValid) {
-                var c: Canvas? = null
+            val c: Canvas? = try {
+                if (hasSurface && h.surface.isValid) h.lockCanvas() else null
+            } catch (e: IllegalStateException) {
+                null
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+            if (c != null) {
                 try {
-                    c = h.lockCanvas()
-                    if (c != null) {
-                        c.drawColor(android.graphics.Color.BLACK)
-                        c.save()
-                        c.translate(offX, offY)
-                        c.scale(scale, scale)
-                        renderer?.draw(c, plant, System.currentTimeMillis(), pressed, tab)
-                        c.restore()
-                    }
+                    c.drawColor(android.graphics.Color.BLACK)
+                    c.save()
+                    c.translate(offX, offY)
+                    c.scale(scale, scale)
+                    renderer?.draw(c, plant, System.currentTimeMillis(), pressed, tab)
+                    c.restore()
                 } finally {
-                    if (c != null) h.unlockCanvasAndPost(c)
+                    try {
+                        h.unlockCanvasAndPost(c)
+                    } catch (e: IllegalStateException) {
+                        // the surface went out from under us mid-frame
+                    } catch (e: IllegalArgumentException) {
+                    }
                 }
             }
 
@@ -121,6 +193,21 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
                 try { Thread.sleep(wait) } catch (e: InterruptedException) { return }
             }
         }
+    }
+
+    /**
+     * One frame's worth of world: apply anything the UI thread queued, then step
+     * the plant and hand the audio the events it threw off. Called by the loop
+     * every frame, and by the tests in its place.
+     */
+    fun advance(dt: Double) {
+        if (pendingReset) {
+            pendingReset = false
+            plant.reset()
+            tab = Tab.CONTROL
+        }
+        plant.step(dt)
+        audio.update(plant, dt)
     }
 
     // ------------------------------------------------------------------ input
@@ -153,9 +240,11 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
         val p = plant
 
         if (p.ended) {
-            p.reset()
-            tab = Tab.CONTROL
-            renderer?.release()
+            // Hand the reset to the game thread rather than tearing the plant
+            // down underneath it mid-step.
+            pendingReset = true
+            grabs.clear()
+            pressed.clear()
             return
         }
 
@@ -164,7 +253,11 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
             for ((i, t) in Tab.entries.withIndex()) {
                 if (l.tabRect(i).contains(x, y) && t != tab) {
                     tab = t
-                    renderer?.release()
+                    // No release here: the renderer rebuilds its own cached
+                    // steelwork when it notices the deck has changed, and
+                    // recycling that bitmap from this thread is what used to
+                    // crash the game every so often on a tab tap.
+                    grabs.clear()
                     audio.tick()
                 }
             }

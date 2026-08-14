@@ -282,6 +282,16 @@ class PanelRenderer(val L: Layout) {
         return (standby + house + panel).coerceIn(0.45f, 1.0f)
     }
 
+    /**
+     * Draw a frame.
+     *
+     * Synchronised against [release] because they run on different threads: the
+     * game loop draws, and the view releases from the UI thread when the surface
+     * changes. Without the lock the cached background can be recycled between
+     * the null check and the draw, which crashes with "cannot draw recycled
+     * bitmaps" — and only sometimes, which is the worst kind.
+     */
+    @Synchronized
     fun draw(
         c: Canvas, p: Plant, now: Long, pressed: Set<String>, tab: Tab = Tab.CONTROL
     ) {
@@ -752,8 +762,12 @@ class PanelRenderer(val L: Layout) {
         Theme.engrave(c, "TOUCH TO TAKE ANOTHER SHIFT", cx, y, bodySize * 0.95f, Theme.NICKEL_DARK)
     }
 
+    /** Drop the cached steelwork. Safe to call while the game loop is drawing. */
+    @Synchronized
     fun release() {
         background?.recycle()
         background = null
+        backgroundAmbient = -1f
+        backgroundTab = null
     }
 }
