@@ -179,10 +179,10 @@ class ControlsTouchTest {
         tap(L.fieldSwitch.centerX(), L.fieldSwitch.centerY())
         assertNotEquals("the field switch must throw", fieldBefore, p.ctl.fieldSwitchClosed)
 
-        for (i in L.feeders.indices) {
-            val before = p.ctl.feederClosed[i]
-            tap(L.feeders[i].centerX(), L.feeders[i].centerY())
-            assertNotEquals("feeder $i must throw", before, p.ctl.feederClosed[i])
+        for (i in L.auxSwitches.indices) {
+            val before = p.ctl.auxClosed[i]
+            tap(L.auxSwitches[i].centerX(), L.auxSwitches[i].centerY())
+            assertNotEquals("internal switch $i must throw", before, p.ctl.auxClosed[i])
         }
 
         showTab(Tab.CONTROL)

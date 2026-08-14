@@ -2,14 +2,22 @@
 
 An Android game about running a late-1920s gasoline-engine electric light plant
 by hand. There is no governor, no voltage regulator, no automatic synchroniser
-and no tutorial. There is an engine, a switchboard, and a town that expects its
-lights to work.
+and no tutorial. There is an engine, a switchboard, and a dispatcher who expects
+his kilowatts on time.
 
-You are the night operator at the Millbrook Electric Light & Power Company. A
+You are the night operator at the Millbrook Light & Power Company. A
 two-cylinder horizontal gasoline engine drives a 12-pole, 2300 volt, 60 cycle
-alternator. The town bus is shared with the little Willow Creek hydro station,
-which can carry 56 kilowatts and not one watt more. Demand steps to a new figure
-every ninety seconds, all night.
+alternator, and that set is tied into a full interconnection through a main
+transformer and a unit breaker.
+
+The grid is large. Your 120 kilowatts is a rounding error on it, so you do not
+set its frequency — you follow it. What you do control is how much you put onto
+the bars, and the dispatcher hands you a new load order every ninety seconds.
+
+The switchboard is not for the grid. It is for the plant's own internal
+supplies: the ignition, the cooling water pump, the battery charger and the
+house lighting all hang off a station service bus, and keeping that bus alive is
+what keeps the engine alive.
 
 ## The controls
 
@@ -23,9 +31,10 @@ every ninety seconds, all night.
 | Mixture | 17.5:1 lean to 9.5:1 rich, as supplied to the intake |
 | Field rheostat | Excitation: terminal volts off the bus, reactive load on it |
 
-**Switchgear**: main breaker, field switch, and four feeder knife switches with
-cartridge fuses — Main Street lighting, Mill No. 2 motors, the ice house, and
-the street railway.
+**Switchboard (internal supplies)**: the unit breaker out to the grid, the field
+switch, and four knife switches with cartridge fuses feeding the plant itself —
+ignition (0.4 kW), cooling water pump (3.4 kW), battery charger (2.1 kW) and
+house lights (1.3 kW).
 
 **Starting gear**: relief cock, primer, starting crank, and the electric starting
 motor (wired through the `EMG` position only).
@@ -42,7 +51,7 @@ makes between the machine and the board:
 - **CONTROL** — engine speed, oil and jacket gauges, the five mains, the
   starting gear, and the water and oil handwheels.
 - **ELECTRICAL** — the station single line, and under it the switchboard
-  carrying the main breaker, the field switch and the four feeders.
+  carrying the unit breaker, the field switch and the four internal supplies.
 
 A red pip appears on whichever tab you are not looking at when something over
 there wants attention. The annunciator strip along the foot is always live.
@@ -55,23 +64,38 @@ bright with current beads sliding along them; dead ones go grey; open contacts
 show as a blade swung clear of its jaws.
 
 ```
-   WILLOW CREEK
+   INTERCONNECTION
         |
-  ======+=================== TOWN BUS 2300 V ==================
-        |            |            |     |     |     |
-    MAIN TX      STARTING TX      the four feeders, each
-        |            |            through its switch and fuse
-     BREAKER         |
-        |            |
-      [ GEN ]        |
-        |            |
-        +---(GEN)----+---(GRID)---- STATION SERVICE ----(EMG)--- BATTERY
+  ======+============= GRID 2300 V =========================
+        |                        |
+    MAIN TX                 STARTING TX
+        |                        |
+    UNIT BKR                     |
+        |                        |
+      [ GEN ]                    |
+        |                        |
+        +---(GEN)----------------+---(GRID)-----+------(EMG)--- BATTERY
+                                                |
+                    ===== STATION SERVICE =====
+                       |      |      |      |
+                      IGN   PUMP   CHGR   LIGHT
 ```
 
 Only one of the three taps into the station service bus is made at a time, and
-the selector is what makes it. Watch the battery branch: it runs one way when
-you are drawing off `EMG` and the other way when the charging set is putting the
-cells back.
+the selector is what makes it. Each internal load has its own switch and fuse on
+the board. Watch the battery branch: it runs one way when you are drawing off
+`EMG` and the other way when the charging set is putting the cells back.
+
+**The bus has a limit.** The grid and the generator will each carry 26 kW, which
+is more than the whole board asks for. The battery will carry 5 kW, which is
+not. On emergency supply you have to decide what matters: the charger cannot put
+anything back while the battery is the thing feeding the bus, so switch it out.
+Overload the bus far enough and the volts sag until loads drop out, and then a
+fuse goes.
+
+**The cooling water pump is an electric machine on that bus.** The gate valve on
+the control deck meters the flow, but if the pump is not running the gate does
+nothing at all and the engine will cook with the valve wide open.
 
 ## The supply selector
 
@@ -83,9 +107,9 @@ GRID --- GEN --- OFF --- EMG
   bus    the machine     the battery
 ```
 
-- **GRID** — station service tapped off the town bus through the starting
+- **GRID** — station service tapped off the grid through the starting
   transformer. Full and steady at any speed, so it will start a stone cold
-  engine. But it fades as the bus volts sag, which means the ignition goes weak
+  engine. But it fades as the grid volts sag, which means the ignition goes weak
   exactly when the system is in trouble and you most need the engine.
 - **GEN** — the machine's own shaft-driven exciter. Nothing at rest,
   strengthening with speed. It cannot start the engine, and it is the right
@@ -153,18 +177,24 @@ The machine is now locked to the bus, and the controls change meaning:
   therefore the **reactive load**. Too little field and the pull-out limit falls
   until the rotor slips a pole, which is spectacular and final.
 
-Demand steps every ninety seconds. Willow Creek leans in as the bus falls but is
-against its stops at 56 kilowatts, after which the cycles are yours to hold. If
-you cannot carry the town, pull a feeder and shed it deliberately. If you
-over-generate, the frequency runs away just as surely.
+The dispatcher's order steps every ninety seconds and the header shows what you
+are asked for against what you are actually putting on the bars. Being off order
+costs you.
+
+The system is not perfectly steady either. It wanders about 60 cycles, and now
+and then something large elsewhere trips and knocks the frequency down. When
+that happens your machine leans in on its own — the rotor angle opens and your
+output jumps — and you have to trim back. Let the frequency go far enough
+outside limits while you are tied on and the system protection sheds you.
 
 ## Things that will end your shift
 
 Kickback on the crank · seized main bearing · thrown connecting rod · piston
-burned through by detonation · seizure from a boiled-dry jacket · burst flywheel
-from throwing the load off at full throttle · sheared coupling from closing out
-of phase · pole slip from too little field · a blacked-out town · a flat battery
-with an exciter that will not fire at rest.
+burned through by detonation · seizure from a boiled-dry jacket (including one
+caused by leaving the water pump switched out) · burst flywheel from throwing
+the load off at full throttle · sheared coupling from closing out of phase ·
+pole slip from too little field · thrown off the system by the protection · a
+flat battery with an exciter that will not fire at rest.
 
 **Throwing the breaker open at full load is the fastest way to destroy the
 engine.** There is no governor to catch it. Shut the throttle first.
@@ -181,7 +211,7 @@ Requires the Android SDK (compileSdk 35) and a JDK 17 or newer.
 ## How it is put together
 
 ```
-sim/     Plant, Engine, Generator, Grid — plain Kotlin, no Android imports
+sim/     Plant, Engine, Generator, Grid, Service — plain Kotlin, no Android imports
 ui/      Theme, Gauges, Widgets, Mimic, Layout, PanelRenderer — all drawn on a Canvas
 game/    GameView — the loop and the multi-touch handling
 audio/   EngineAudio — synthesised at runtime, no sample files

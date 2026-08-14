@@ -32,8 +32,20 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     var knockDamage: Double = 0.0       // 0..1 cumulative, 1 = holed piston
     var bearingWear: Double = 0.0       // 0..1 cumulative, 1 = thrown rod
 
-    /** Volts on the town bus, per unit, for the GRID position of the selector. */
+    /** Volts on the grid, per unit, for the GRID position of the selector. */
     var busSupplyPu: Double = 1.0
+
+    /**
+     * Volts on the station service bus, per unit, and whether the ignition and
+     * the cooling water pump are actually switched in and running. All three are
+     * set by the Plant from the switchboard each step.
+     */
+    var serviceVolts: Double = 0.0
+    var ignitionLive: Boolean = true
+    var waterPumpRunning: Boolean = false
+    var chargerRunning: Boolean = false
+    /** Kilowatts the internal bus is drawing, for the battery drain. */
+    var serviceDrawKw: Double = 0.0
 
     // --- starter ---
     var starterEngaged: Boolean = false
@@ -56,15 +68,30 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
 
     val ambientC = 8.0
 
-    /** Spark energy 0..1 available at the plug for the selector position and speed. */
+    /**
+     * Spark energy 0..1 at the plug. The coils are fed from the station service
+     * bus, so the selector chooses the source and the switchboard decides whether
+     * the ignition is switched in and whether the bus is holding its volts.
+     */
     fun sparkEnergy(ctl: Controls, rpm: Double): Double {
-        val raw = when (ctl.ignition) {
-            IgnitionMode.GRID -> gridSupply()
-            IgnitionMode.GEN -> generatorSupply(rpm)
-            IgnitionMode.EMG -> emergencySupply(rpm)
-            IgnitionMode.OFF -> 0.0
-        }
-        return clamp(raw * (1.0 - 0.85 * plugFouling), 0.0, 1.0)
+        if (!ignitionLive) return 0.0
+        var e = serviceVolts
+        // Fed from the cells it is a coil box, and the coil runs out of dwell as
+        // the revolutions rise. Fed from the bus it is a proper transformer set.
+        if (ctl.ignition == IgnitionMode.EMG) e *= coilDwellFade(rpm)
+        return clamp(e * (1.0 - 0.85 * plugFouling), 0.0, 1.0)
+    }
+
+    /** How well the battery coil box keeps up as the engine speeds up. */
+    fun coilDwellFade(rpm: Double): Double =
+        clamp(1.0 - max(0.0, rpm - 430.0) / 620.0, 0.0, 1.0)
+
+    /** What the selected source is worth right now, before the internal bus. */
+    fun sourceStrength(ctl: Controls, rpm: Double): Double = when (ctl.ignition) {
+        IgnitionMode.GRID -> gridSupply()
+        IgnitionMode.GEN -> generatorSupply(rpm)
+        IgnitionMode.EMG -> emergencySupply(rpm)
+        IgnitionMode.OFF -> 0.0
     }
 
     /**
@@ -84,10 +111,15 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         return clamp(t * t * (3 - 2 * t) * 1.05, 0.0, 1.0)
     }
 
-    /** The battery: fat at cranking speed, fading as the revolutions rise. */
+    /**
+     * Battery terminal volts, per unit. A lead cell holds close to its nominal
+     * voltage almost all the way down and then falls off a cliff, so state of
+     * charge is not the same thing as how good the supply is.
+     */
     fun emergencySupply(rpm: Double): Double {
-        val speedFade = clamp(1.0 - max(0.0, rpm - 430.0) / 620.0, 0.0, 1.0)
-        return clamp(batteryCharge * speedFade, 0.0, 1.0)
+        val steady = 1.02 - 0.10 * (1.0 - batteryCharge)
+        val cliff = 0.95 * max(0.0, 0.18 - batteryCharge) / 0.18
+        return clamp(steady - cliff, 0.0, 1.0)
     }
 
     /**
@@ -226,18 +258,15 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         // Only the emergency position draws on the cells; the other two are fed
         // from the bus or from the machine itself.
         if (ctl.ignition == IgnitionMode.EMG) {
-            batteryCharge = max(0.0, batteryCharge - dt * 0.0034 * (1.0 + rpm / 600.0))
+            // Everything switched onto the bus is coming out of the cells.
+            batteryCharge = max(0.0, batteryCharge - dt * 0.0022 * (1.0 + serviceDrawKw * 0.55))
         }
-        // The charging set hangs off the station service bus, so the cells only go
-        // back up while that bus is being fed from the grid or from the machine.
-        val serviceForCharging = when (ctl.ignition) {
-            IgnitionMode.GRID -> gridSupply()
-            IgnitionMode.GEN -> generatorSupply(rpm)
-            else -> 0.0
-        }
-        batteryChargingNow = serviceForCharging > 0.35 && batteryCharge < 0.999
+        // The charging set is a switched load on the internal bus, and it cannot
+        // put anything back while the bus is being fed by the battery itself.
+        val canCharge = chargerRunning && ctl.ignition != IgnitionMode.EMG
+        batteryChargingNow = canCharge && batteryCharge < 0.999
         if (batteryChargingNow) {
-            batteryCharge = min(1.0, batteryCharge + dt * 0.013 * serviceForCharging)
+            batteryCharge = min(1.0, batteryCharge + dt * 0.013 * clamp(serviceVolts, 0.0, 1.0))
         }
 
         // ---- flooding -----------------------------------------------------------
@@ -276,9 +305,10 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         val retardHeat = clamp((optimalAdvanceDeg(rpm, afr) - advance) / 26.0, 0.0, 1.0) * 1.15
         val heatIn = burnPu * 3.2 * (1.0 + leanHeat + retardHeat) + 0.04
 
-        // Water jacket. With the gate shut there is only convection to the engine room,
-        // and a hard-working engine will cook itself in a couple of minutes.
-        val flow = clamp(ctl.waterValve, 0.0, 1.0)
+        // Water jacket. The gate meters the flow, but the circulating pump is an
+        // electric machine on the station service bus: lose that and the gate
+        // does nothing at all.
+        val flow = if (waterPumpRunning) clamp(ctl.waterValve, 0.0, 1.0) else 0.0
         val cooling = (0.05 + 1.30 * flow) * (jacketTempC - ambientC) * 0.0535
         jacketTempC += (heatIn - cooling) * dt
         jacketTempC = max(ambientC, jacketTempC)
@@ -335,6 +365,8 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         oilFilm = 1.0; oilInSump = 1.0; oilPressureKpa = 0.0
         batteryCharge = 1.0; plugFouling = 0.0; floodLevel = 0.0; firingSuccess = 0.0
         busSupplyPu = 1.0
+        serviceVolts = 0.0; ignitionLive = true; waterPumpRunning = false
+        chargerRunning = false; serviceDrawKw = 0.0
         knockIndex = 0.0; knockDamage = 0.0; bearingWear = 0.0
         starterEngaged = false; starterCranking = false; starterHeat = 0.0
         batteryChargingNow = false

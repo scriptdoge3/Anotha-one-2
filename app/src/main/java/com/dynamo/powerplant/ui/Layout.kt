@@ -114,8 +114,8 @@ class Layout(val w: Float, val h: Float) {
         mainBreaker.right + w * 0.148f, mainBreaker.bottom
     )
 
-    /** Four feeder knife switches out to the town. */
-    val feeders: List<RectF> = run {
+    /** The four internal supply switches on the board. */
+    val auxSwitches: List<RectF> = run {
         val left = fieldSwitch.right + w * 0.024f
         val right = boardPlate.right - w * 0.018f
         val each = (right - left) / 4f

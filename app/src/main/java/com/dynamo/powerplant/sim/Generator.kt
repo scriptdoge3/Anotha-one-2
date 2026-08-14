@@ -77,11 +77,11 @@ class Generator {
             return 0.6 * fieldFlux * rpm * 0.02
         }
 
-        val v = bus.busVolts
+        val v = bus.volts
         val xs = Spec.XS_PU * (Spec.RATED_VOLTS * Spec.RATED_VOLTS) / (Spec.RATED_KW * 1000.0)
 
         // Swing: the rotor angle advances at the difference between machine and bus.
-        val slipRad = (rpm - Spec.hzToRpm(bus.busHz)) * PI / 30.0
+        val slipRad = (rpm - Spec.hzToRpm(bus.hz)) * PI / 30.0
         delta += slipRad * dt
 
         if (abs(delta) > PI) {

@@ -31,8 +31,9 @@ object Mimic {
     private const val START_TX_X = 0.400f
     private const val START_TX_Y = 0.420f
     private const val SERVICE_Y = 0.800f
-    private const val BATT_X = 0.760f
-    private const val BATT_Y = 0.885f
+    private const val BATT_X = 0.860f
+    private const val BATT_Y = 0.900f
+    private const val LOAD_Y = 0.940f
 
     fun draw(c: Canvas, r: RectF, p: Plant, ambient: Float, phase: Float) {
         fun x(f: Float) = r.left + r.width() * f
@@ -47,82 +48,82 @@ object Mimic {
         )
 
         // ---- what is alive -----------------------------------------------------
-        val busPu = p.grid.busVolts / Spec.RATED_VOLTS
-        val busLive = busPu > 0.45
+        val gridLive = p.grid.volts > Spec.RATED_VOLTS * 0.45
         val genLive = p.gen.emf(p.rpm) > Spec.RATED_VOLTS * 0.15
         val tied = p.ctl.mainBreakerClosed
         val sel = p.ctl.ignition
 
-        val gridService = sel == IgnitionMode.GRID && p.engine.gridSupply() > 0.02
-        val genService = sel == IgnitionMode.GEN && p.engine.generatorSupply(p.rpm) > 0.02
-        val battService = sel == IgnitionMode.EMG && p.engine.batteryCharge > 0.02
-        val serviceLive = gridService || genService || battService
+        val strength = p.engine.sourceStrength(p.ctl, p.rpm)
+        val gridService = sel == IgnitionMode.GRID && strength > 0.02
+        val genService = sel == IgnitionMode.GEN && strength > 0.02
+        val battService = sel == IgnitionMode.EMG && strength > 0.02
+        val serviceLive = p.service.volts > 0.05
         val charging = p.engine.batteryChargingNow
 
-        // ---- the town bus ------------------------------------------------------
-        busBar(c, x(0.055f), x(0.945f), y(BUS_Y), unit, busLive, ambient, phase, 0.55f)
-        label(c, "TOWN BUS  2300 V", x(0.205f), y(BUS_Y) - unit * 1.05f, unit * 0.80f, ambient, Paint.Align.LEFT)
+        // ---- the transmission line ---------------------------------------------
+        busBar(c, x(0.055f), x(0.945f), y(BUS_Y), unit, gridLive, ambient, phase, 0.55f)
+        label(c, "GRID  2300 V", x(0.300f), y(BUS_Y) - unit * 1.05f, unit * 0.80f, ambient, Paint.Align.LEFT)
 
-        // incoming from the other station
         val inX = x(0.075f)
-        conductor(c, inX, y(0.045f), inX, y(BUS_Y), unit, busLive, ambient, phase, 0.35f)
-        box(c, RectF(inX - unit * 2.9f, y(0.010f) - unit * 0.95f, inX + unit * 2.9f, y(0.010f) + unit * 0.95f),
-            "WILLOW CREEK", unit * 0.72f, busLive, ambient)
+        conductor(c, inX, y(0.045f), inX, y(BUS_Y), unit, gridLive, ambient, phase, 0.35f)
+        box(c, RectF(inX - unit * 3.4f, y(0.010f) - unit * 0.95f, inX + unit * 3.4f, y(0.010f) + unit * 0.95f),
+            "INTERCONNECTION", unit * 0.68f, gridLive, ambient)
 
-        // ---- the machine and its main transformer ------------------------------
+        // ---- the unit: generator, main transformer, unit breaker ---------------
         val gx = x(GEN_X)
-        conductor(c, gx, y(BUS_Y), gx, y(MAIN_TX_Y) - unit * 1.5f, unit, busLive, ambient, phase, 0.35f)
+        conductor(c, gx, y(BUS_Y), gx, y(MAIN_TX_Y) - unit * 1.5f, unit, gridLive, ambient, phase, 0.35f)
         transformer(c, gx, y(MAIN_TX_Y), unit * 1.5f, tied && genLive, ambient)
         label(c, "MAIN", gx + unit * 2.4f, y(MAIN_TX_Y) + unit * 0.35f, unit * 0.72f, ambient, Paint.Align.LEFT)
 
         conductor(c, gx, y(MAIN_TX_Y) + unit * 1.5f, gx, y(BREAKER_Y) - unit * 1.1f, unit, tied && genLive, ambient, phase, 0.35f)
         contact(c, gx, y(BREAKER_Y), unit * 1.1f, tied, ambient, vertical = true)
-        label(c, "BREAKER", gx + unit * 2.0f, y(BREAKER_Y) + unit * 0.35f, unit * 0.72f, ambient, Paint.Align.LEFT)
+        label(c, "UNIT BKR", gx + unit * 2.0f, y(BREAKER_Y) + unit * 0.35f, unit * 0.70f, ambient, Paint.Align.LEFT)
 
         conductor(c, gx, y(BREAKER_Y) + unit * 1.1f, gx, y(GEN_Y) - unit * 1.7f, unit, tied && genLive, ambient, phase, 0.35f)
         machine(c, gx, y(GEN_Y), unit * 1.7f, genLive, ambient)
 
-        // ---- station service: three sources, one selector ----------------------
+        // ---- station service: three sources into one internal bus --------------
         val serviceLeft = x(0.255f)
-        val serviceRight = x(0.800f)
+        val serviceRight = x(0.930f)
         busBar(c, serviceLeft, serviceRight, y(SERVICE_Y), unit * 0.8f, serviceLive, ambient, phase, 0.40f)
-        label(
-            c, "STATION SERVICE", (serviceLeft + serviceRight) / 2f, y(SERVICE_Y) + unit * 1.85f,
-            unit * 0.78f, ambient, Paint.Align.CENTER
+        val hdr = if (p.service.overloaded) "STATION SERVICE  OVERLOAD" else
+            "STATION SERVICE  %.1f / %.1f kW".format(p.service.demandKw, p.service.capacityKw)
+        Theme.engrave(
+            c, hdr, serviceLeft, y(SERVICE_Y) - unit * 1.05f, unit * 0.72f,
+            Theme.dim(if (p.service.overloaded) Theme.DANGER else Theme.MARK_SOFT, ambient),
+            Paint.Align.LEFT
         )
 
-        // GEN tap: off the machine terminals, below the breaker
+        // GEN tap, off the machine terminals
         val genTapX = x(0.275f)
         conductor(c, gx, y(GEN_Y), genTapX, y(GEN_Y), unit * 0.8f, genService, ambient, phase, 0.30f)
         conductor(c, genTapX, y(GEN_Y), genTapX, y(SERVICE_Y) + unit * 1.0f, unit * 0.8f, genService, ambient, phase, 0.30f)
         contact(c, genTapX, y(SERVICE_Y) + unit * 0.5f, unit * 0.85f, genService, ambient, vertical = true)
 
-        // GRID tap: down through the starting transformer
+        // GRID tap, down through the starting transformer
         val sx = x(START_TX_X)
-        conductor(c, sx, y(BUS_Y), sx, y(START_TX_Y) - unit * 1.3f, unit * 0.8f, busLive, ambient, phase, 0.30f)
+        conductor(c, sx, y(BUS_Y), sx, y(START_TX_Y) - unit * 1.3f, unit * 0.8f, gridLive, ambient, phase, 0.30f)
         transformer(c, sx, y(START_TX_Y), unit * 1.3f, gridService, ambient)
         label(c, "STARTING", sx + unit * 2.1f, y(START_TX_Y) + unit * 0.30f, unit * 0.70f, ambient, Paint.Align.LEFT)
         conductor(c, sx, y(START_TX_Y) + unit * 1.3f, sx, y(SERVICE_Y) - unit * 1.0f, unit * 0.8f, gridService, ambient, phase, 0.30f)
         contact(c, sx, y(SERVICE_Y) - unit * 0.5f, unit * 0.85f, gridService, ambient, vertical = true)
 
-        // EMG tap: the battery, which also charges back off the service bus
+        // EMG tap, the battery, which the charging set also feeds back into
         val bx = x(BATT_X)
         conductor(c, bx, y(SERVICE_Y), bx, y(BATT_Y) - unit * 1.2f, unit * 0.8f, battService || charging, ambient,
             phase, if (charging && !battService) -0.30f else 0.30f)
         contact(c, bx, y(SERVICE_Y) + unit * 1.1f, unit * 0.85f, true, ambient, vertical = true)
         battery(c, bx, y(BATT_Y), unit * 1.2f, p.engine.batteryCharge.toFloat(), battService, charging, ambient)
 
-        // ---- feeders out to the town -------------------------------------------
-        for (i in p.grid.feeders.indices) {
-            val f = p.grid.feeders[i]
-            val fx = x(0.560f + i * 0.108f)
-            val closed = p.ctl.feederClosed[i] && !f.fuseBlown
-            val alive = closed && busLive
-            conductor(c, fx, y(BUS_Y), fx, y(0.300f), unit * 0.8f, busLive, ambient, phase, 0.30f)
-            contact(c, fx, y(0.350f), unit * 0.85f, closed, ambient, vertical = true)
-            conductor(c, fx, y(0.400f), fx, y(0.480f), unit * 0.8f, alive, ambient, phase, 0.30f)
-            fuseSymbol(c, fx, y(0.520f), unit * 0.85f, f.fuseBlown, alive, ambient)
-            label(c, f.shortName, fx, y(0.630f), unit * 0.66f, ambient, Paint.Align.CENTER)
+        // ---- the internal loads hanging off the service bus --------------------
+        for (i in p.service.loads.indices) {
+            val l = p.service.loads[i]
+            val lx = x(0.335f + i * 0.098f)
+            val switched = p.ctl.auxClosed[i] && !l.fuseBlown
+            conductor(c, lx, y(SERVICE_Y), lx, y(LOAD_Y) - unit * 1.6f, unit * 0.7f, l.running, ambient, phase, 0.30f)
+            contact(c, lx, y(LOAD_Y) - unit * 2.2f, unit * 0.75f, switched, ambient, vertical = true)
+            fuseSymbol(c, lx, y(LOAD_Y) - unit * 0.6f, unit * 0.75f, l.fuseBlown, l.running, ambient)
+            label(c, l.shortName, lx, y(LOAD_Y) + unit * 1.15f, unit * 0.64f, ambient, Paint.Align.CENTER)
         }
     }
 

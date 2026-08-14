@@ -110,8 +110,8 @@ class RenderTest {
         run(p, 50.0) { trim(it); hold(it, 60.0, 1.0 / 60.0) }
         sweepTo(p, IgnitionMode.GEN)
         run(p, 20.0) {
-            trim(it); hold(it, it.grid.busHz + 0.10, 1.0 / 60.0)
-            it.ctl.excitation = (it.ctl.excitation + (it.grid.busVolts - it.genVolts) * 0.0035 / 60.0).coerceIn(0.0, 1.0)
+            trim(it); hold(it, it.grid.hz + 0.10, 1.0 / 60.0)
+            it.ctl.excitation = (it.ctl.excitation + (it.grid.volts - it.genVolts) * 0.0035 / 60.0).coerceIn(0.0, 1.0)
         }
         // stop where the lamps are bright, so the sync gear is clearly doing something
         var guard = 0
@@ -132,19 +132,21 @@ class RenderTest {
         run(p, 50.0) { trim(it); hold(it, 60.0, 1.0 / 60.0) }
         sweepTo(p, IgnitionMode.GEN)
         run(p, 50.0) {
-            trim(it); hold(it, it.grid.busHz + 0.10, 1.0 / 60.0)
-            it.ctl.excitation = (it.ctl.excitation + (it.grid.busVolts - it.genVolts) * 0.0035 / 60.0).coerceIn(0.0, 1.0)
+            trim(it); hold(it, it.grid.hz + 0.10, 1.0 / 60.0)
+            it.ctl.excitation = (it.ctl.excitation + (it.grid.volts - it.genVolts) * 0.0035 / 60.0).coerceIn(0.0, 1.0)
         }
         var guard = 0
         while (guard++ < 60000 && !p.ended) {
-            trim(p); hold(p, p.grid.busHz + 0.10, 1.0 / 240.0)
-            p.ctl.excitation = (p.ctl.excitation + (p.grid.busVolts - p.genVolts) * 0.0035 / 240.0).coerceIn(0.0, 1.0)
+            trim(p); hold(p, p.grid.hz + 0.10, 1.0 / 240.0)
+            p.ctl.excitation = (p.ctl.excitation + (p.grid.volts - p.genVolts) * 0.0035 / 240.0).coerceIn(0.0, 1.0)
             p.step(1.0 / 240.0)
             if (abs(p.syncPhase) < 0.06 && abs(p.slipHz) < 0.30) { p.toggleBreaker(); break }
         }
-        p.toggleFeeder(1)
-        p.toggleFeeder(3)
-        run(p, 90.0) { trim(it); hold(it, 60.0, 1.0 / 60.0) }
+        run(p, 90.0) { pl ->
+            trim(pl)
+            val err = pl.grid.dispatchKw() - pl.outputKw
+            pl.ctl.throttle = (pl.ctl.throttle + err * 0.0012).coerceIn(0.0, 1.0)
+        }
         shoot("04-on-the-bus", p)
         shoot("06-electrical-tied", p, tab = Tab.ELECTRICAL)
     }

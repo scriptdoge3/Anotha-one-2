@@ -18,7 +18,7 @@ enum class Failure(val headline: String, val detail: String) {
     FLYWHEEL_BURST("FLYWHEEL BURST", "Load thrown off at full throttle with nobody on the valve. The rim went through the roof."),
     OUT_OF_PHASE("SHAFT WRECKED CLOSING OUT OF PHASE", "You closed the breaker with the machines fighting each other. The coupling sheared and took the crankshaft with it."),
     POLE_SLIP("MACHINE FELL OUT OF STEP", "Field too weak for the load being carried. The rotor slipped a pole and the whole station shook."),
-    BLACKOUT("THE TOWN WENT DARK", "Frequency collapsed on the bus. Every lamp in the county is out and the mill has stopped."),
+    GRID_TRIP("THROWN OFF THE SYSTEM", "The interconnection protection would not hold you any longer. The unit is off the bars and the dispatcher wants an explanation."),
     BATTERY_DEAD("NOTHING LEFT IN THE CELLS", "The battery is flat, the exciter will not fire at rest, and there is no way to turn the engine over."),
     SHIFT_COMPLETE("SHIFT COMPLETE", "Seven and a half hours on the boards. The day man is here to take over.")
 }
@@ -56,6 +56,7 @@ class Plant(seed: Long = System.nanoTime()) {
     val engine = Engine(Random(seed xor 0x5EED))
     val gen = Generator()
     val grid = Grid(Random(seed xor 0xB055))
+    val service = Service()
     val events = PlantEvents()
 
     var rpm: Double = 0.0
@@ -84,12 +85,13 @@ class Plant(seed: Long = System.nanoTime()) {
         private set
 
     private var wasBreakerClosed = false
+    private var gridTripSeconds = 0.0
     private var previousDemandStep = 0
 
     val running: Boolean get() = engine.running
     val hz: Double get() = Spec.rpmToHz(rpm)
-    val genVolts: Double get() = if (ctl.mainBreakerClosed) grid.busVolts else gen.emf(rpm)
-    val slipHz: Double get() = hz - grid.busHz
+    val genVolts: Double get() = if (ctl.mainBreakerClosed) grid.volts else gen.emf(rpm)
+    val slipHz: Double get() = hz - grid.hz
     val outputKw: Double get() = gen.realPowerW / 1000.0
     val outputKvar: Double get() = gen.reactivePowerVar / 1000.0
     val ended: Boolean get() = failure != Failure.NONE
@@ -101,7 +103,7 @@ class Plant(seed: Long = System.nanoTime()) {
         if (ctl.mainBreakerClosed) return 0.0
         if (!ctl.fieldSwitchClosed) return 0.0
         val vg = gen.emf(rpm)
-        val vb = grid.busVolts
+        val vb = grid.volts
         // Voltage across the lamp is the vector difference of the two systems.
         val diff = Math.sqrt(vg * vg + vb * vb - 2 * vg * vb * Math.cos(syncPhase))
         return clamp(diff / (Spec.RATED_VOLTS * 1.35), 0.0, 1.0)
@@ -129,7 +131,7 @@ class Plant(seed: Long = System.nanoTime()) {
         while (phi > PI) phi -= 2 * PI
         while (phi < -PI) phi += 2 * PI
 
-        val dV = abs(gen.emf(rpm) - grid.busVolts) / Spec.RATED_VOLTS
+        val dV = abs(gen.emf(rpm) - grid.volts) / Spec.RATED_VOLTS
         var shock = abs(sin(phi / 2.0)) + dV * 0.5 + abs(slipHz) * 0.35
 
         // A dead machine simply cannot be paralleled.
@@ -171,14 +173,15 @@ class Plant(seed: Long = System.nanoTime()) {
         rpm = max(0.0, rpm + deltaRpm)
     }
 
-    fun toggleFeeder(i: Int) {
+    /** Throw one of the internal supply switches on the board. */
+    fun toggleAux(i: Int) {
         if (ended) return
-        val f = grid.feeders[i]
-        if (f.fuseBlown && !ctl.feederClosed[i]) {
+        val l = service.loads[i]
+        if (l.fuseBlown && !ctl.auxClosed[i]) {
             // Replacing a cartridge fuse takes a moment but you can do it.
-            f.fuseBlown = false
+            l.fuseBlown = false
         }
-        ctl.feederClosed[i] = !ctl.feederClosed[i]
+        ctl.auxClosed[i] = !ctl.auxClosed[i]
         events.knifeSwitch = true
     }
 
@@ -196,19 +199,33 @@ class Plant(seed: Long = System.nanoTime()) {
             if (ended) return
         }
         shiftSeconds += min(dtWall, 0.25)
-        if (grid.demandStep != previousDemandStep) {
-            previousDemandStep = grid.demandStep
+        if (grid.dispatchStep != previousDemandStep) {
+            previousDemandStep = grid.dispatchStep
             events.demandChanged = true
         }
-        if (grid.demandStep >= 15) fail(Failure.SHIFT_COMPLETE)
+        if (grid.dispatchStep >= 15) fail(Failure.SHIFT_COMPLETE)
     }
 
     private fun integrate(dt: Double) {
         val omega = rpm * PI / 30.0
 
-        // Tell the engine what the station service is worth this instant, so the
-        // GRID position of the selector rises and falls with the town bus.
-        engine.busSupplyPu = grid.busVolts / Spec.RATED_VOLTS
+        // Work out the internal supply before anything else, because the ignition,
+        // the cooling water pump and the charging set all hang off it.
+        engine.busSupplyPu = grid.volts / Spec.RATED_VOLTS
+        val strength = engine.sourceStrength(ctl, rpm)
+        val capacity = when (ctl.ignition) {
+            IgnitionMode.GRID -> Service.CAPACITY_GRID_KW
+            IgnitionMode.GEN -> Service.CAPACITY_GEN_KW
+            IgnitionMode.EMG -> Service.CAPACITY_BATTERY_KW
+            IgnitionMode.OFF -> 0.0
+        }
+        service.step(dt, ctl, strength, capacity)
+        if (service.fuseBlewThisStep) events.fuseBlew = true
+        engine.serviceVolts = service.volts
+        engine.ignitionLive = service.isRunning(Service.IGNITION)
+        engine.waterPumpRunning = service.isRunning(Service.PUMP)
+        engine.chargerRunning = service.isRunning(Service.CHARGER)
+        engine.serviceDrawKw = service.demandKw
 
         // ---- prime movers -------------------------------------------------------
         var torque = engine.step(dt, ctl, rpm)
@@ -244,13 +261,12 @@ class Plant(seed: Long = System.nanoTime()) {
         if (ctl.mainBreakerClosed) {
             syncPhase = gen.delta
         } else {
-            syncPhase += 2 * PI * (hz - grid.busHz) * dt
+            syncPhase += 2 * PI * (hz - grid.hz) * dt
             while (syncPhase > PI) syncPhase -= 2 * PI
             while (syncPhase < -PI) syncPhase += 2 * PI
         }
 
         grid.step(dt, gen, ctl)
-        for (f in grid.feeders) if (f.fuseBlown) events.fuseBlew = true
 
         peakOutputKw = max(peakOutputKw, outputKw)
         checkFailures(dt)
@@ -272,7 +288,13 @@ class Plant(seed: Long = System.nanoTime()) {
         if (engine.knockDamage >= 1.0) { fail(Failure.PISTON_HOLED); return }
         if (engine.jacketTempC > Spec.SEIZE_JACKET_C) { fail(Failure.OVERHEAT_SEIZED); return }
         if (couplingDamage >= 1.5) { fail(Failure.OUT_OF_PHASE); return }
-        if (grid.blackout) { fail(Failure.BLACKOUT); return }
+        // The system protection will not carry a unit that is badly out of step.
+        if (ctl.mainBreakerClosed && grid.outsideLimits()) {
+            gridTripSeconds += dt
+            if (gridTripSeconds > 4.0) { fail(Failure.GRID_TRIP); return }
+        } else {
+            gridTripSeconds = max(0.0, gridTripSeconds - dt * 0.5)
+        }
         if (engine.batteryCharge <= 0.001 && rpm < 30.0 && !engine.running) {
             fail(Failure.BATTERY_DEAD); return
         }
@@ -284,14 +306,13 @@ class Plant(seed: Long = System.nanoTime()) {
 
     /** 0..100 for the end-of-shift card. */
     fun score(): Int {
-        var s = grid.energyDeliveredKwh * 4.0
-        s -= grid.unservedKwh * 6.0
-        s -= grid.brownoutSeconds * 0.8
+        var s = grid.energyExportedKwh * 4.5
+        s -= grid.dispatchErrorKws * 0.010
+        s -= grid.secondsOffOrder * 0.35
         s -= couplingDamage * 25.0
         s -= engine.knockDamage * 30.0
         s -= engine.bearingWear * 30.0
-        if (grid.lampsBurnedOut) s -= 20.0
-        for (f in grid.feeders) s -= f.damageSeconds * 0.5
+        for (l in service.loads) if (l.fuseBlown) s -= 6.0
         if (failure != Failure.SHIFT_COMPLETE && failure != Failure.NONE) s -= 40.0
         return clamp(s, 0.0, 100.0).toInt()
     }
@@ -300,18 +321,12 @@ class Plant(seed: Long = System.nanoTime()) {
      * How brightly the panel lamps burn, which depends on whether the source the
      * selector is pointing at is actually alive.
      */
-    fun panelLampLevel(): Double = when (ctl.ignition) {
-        IgnitionMode.GRID ->
-            ctl.ignition.panelLamps * clamp((grid.busVolts / Spec.RATED_VOLTS - 0.40) / 0.40, 0.0, 1.0)
-        IgnitionMode.GEN ->
-            ctl.ignition.panelLamps * clamp(gen.emf(rpm) / Spec.RATED_VOLTS, 0.0, 1.0)
-        IgnitionMode.EMG -> ctl.ignition.panelLamps * engine.batteryCharge
-        IgnitionMode.OFF -> 0.0
-    }
+    fun panelLampLevel(): Double =
+        if (service.isRunning(Service.LIGHTS)) clamp(service.volts, 0.0, 1.0) else 0.0
 
     /** Plant clock: the shift starts at six in the evening. */
     fun clockText(): String {
-        val minutes = (18 * 60 + (shiftSeconds / Grid.DEMAND_PERIOD_S * 30.0)).toInt() % (24 * 60)
+        val minutes = (18 * 60 + (shiftSeconds / Grid.DISPATCH_PERIOD_S * 30.0)).toInt() % (24 * 60)
         val h = minutes / 60
         val m = minutes % 60
         val ampm = if (h < 12) "AM" else "PM"
@@ -327,13 +342,14 @@ class Plant(seed: Long = System.nanoTime()) {
         rpm = 0.0; syncPhase = 0.0; crankTorque = 0.0; couplingDamage = 0.0
         failure = Failure.NONE; shiftSeconds = 0.0; peakOutputKw = 0.0; overspeedSeconds = 0.0
         wasBreakerClosed = false; previousDemandStep = 0
-        engine.reset(); gen.reset(); grid.reset()
+        engine.reset(); gen.reset(); grid.reset(); service.reset()
+        gridTripSeconds = 0.0
         ctl.ignition = IgnitionMode.OFF
         ctl.throttle = 0.0; ctl.sparkLever = 0.5; ctl.mixture = 0.5; ctl.excitation = 0.0
         ctl.compressionRelease = false; ctl.primerCharges = 0
         ctl.waterValve = 0.0; ctl.oilerRate = 0.0
         ctl.mainBreakerClosed = false; ctl.fieldSwitchClosed = true
-        ctl.feederClosed[0] = true; ctl.feederClosed[1] = false
-        ctl.feederClosed[2] = true; ctl.feederClosed[3] = false
+        ctl.auxClosed[0] = true; ctl.auxClosed[1] = true
+        ctl.auxClosed[2] = false; ctl.auxClosed[3] = false
     }
 }

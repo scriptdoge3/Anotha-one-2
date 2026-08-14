@@ -63,14 +63,17 @@ class Controls {
     /** 0..1 mechanical lubricator drip rate. */
     var oilerRate: Double = 0.0
 
-    // --- switchboard ---
+    // --- switchboard: the plant's own internal supplies ---
+    /** The unit breaker, between the main transformer and the grid. */
     var mainBreakerClosed: Boolean = false
     var fieldSwitchClosed: Boolean = true
     /**
-     * Main Street and the Ice House are already alive on Willow Creek's supply
-     * when you take over the shift; the mill and the railway are yours to pick up.
+     * The internal loads on the station service bus, in the order they sit on the
+     * board: ignition, cooling water pump, battery charger, house lights. The
+     * ignition and the pump are left in at handover; the charger and the lights
+     * are your business, and the cells will not carry all four at once.
      */
-    val feederClosed = booleanArrayOf(true, false, true, false)
+    val auxClosed = booleanArrayOf(true, true, false, false)
 
     fun sparkAdvanceDeg(): Double = -5.0 + sparkLever * 43.0
     fun airFuelRatio(): Double = 17.5 - mixture * 8.0

@@ -5,6 +5,7 @@ import com.dynamo.powerplant.sim.Engine
 import com.dynamo.powerplant.sim.Failure
 import com.dynamo.powerplant.sim.IgnitionMode
 import com.dynamo.powerplant.sim.Plant
+import com.dynamo.powerplant.sim.Service
 import com.dynamo.powerplant.sim.Spec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -54,7 +55,7 @@ class SimTest {
 
     /** Bring the volts up to match whatever the bus is doing. */
     private fun matchVolts(p: Plant, dt: Double = 1.0 / 60.0) {
-        p.ctl.excitation = (p.ctl.excitation + (p.grid.busVolts - p.genVolts) * 0.0035 * dt).coerceIn(0.0, 1.0)
+        p.ctl.excitation = (p.ctl.excitation + (p.grid.volts - p.genVolts) * 0.0035 * dt).coerceIn(0.0, 1.0)
     }
 
     /** Turn the key one notch at a time, taking the given seconds per position. */
@@ -112,18 +113,18 @@ class SimTest {
     fun theExciterGivesNothingAtRestButFiresWhenTurning() {
         val p = Plant(1)
         p.ctl.ignition = IgnitionMode.GEN
-        assertTrue("the exciter must be dead at rest", p.engine.sparkEnergy(p.ctl, 0.0) < 0.02)
-        assertTrue("still weak at cranking speed", p.engine.sparkEnergy(p.ctl, 90.0) < 0.35)
-        assertTrue("strong once up to speed", p.engine.sparkEnergy(p.ctl, 600.0) > 0.9)
+        assertTrue("the exciter must be dead at rest", p.engine.sourceStrength(p.ctl, 0.0) < 0.02)
+        assertTrue("still weak at cranking speed", p.engine.sourceStrength(p.ctl, 90.0) < 0.35)
+        assertTrue("strong once up to speed", p.engine.sourceStrength(p.ctl, 600.0) > 0.9)
     }
 
     @Test
-    fun stationServiceIsSteadyWhileTheBusIsHealthy() {
+    fun stationServiceIsSteadyWhileTheGridIsHealthy() {
         val p = Plant(1)
         p.ctl.ignition = IgnitionMode.GRID
         p.engine.busSupplyPu = 1.0
-        assertTrue("GRID must fire even at rest", p.engine.sparkEnergy(p.ctl, 0.0) > 0.9)
-        assertTrue("and at working speed", p.engine.sparkEnergy(p.ctl, 600.0) > 0.9)
+        assertTrue("GRID must be good even at rest", p.engine.sourceStrength(p.ctl, 0.0) > 0.9)
+        assertTrue("and at working speed", p.engine.sourceStrength(p.ctl, 600.0) > 0.9)
     }
 
     @Test
@@ -135,18 +136,20 @@ class SimTest {
         var previous = 1.1
         for (pu in listOf(1.00, 0.90, 0.82, 0.75, 0.68, 0.62)) {
             engine.busSupplyPu = pu
-            val e = engine.sparkEnergy(ctl, 600.0)
-            assertTrue("spark must not strengthen as the bus falls: $pu gave $e", e < previous + 1e-9)
+            val e = engine.sourceStrength(ctl, 600.0)
+            assertTrue("supply must not strengthen as the grid falls: $pu gave $e", e < previous + 1e-9)
             previous = e
         }
         engine.busSupplyPu = 0.62
-        assertTrue("at the bottom there is nothing left", engine.sparkEnergy(ctl, 600.0) < 0.02)
+        assertTrue("at the bottom there is nothing left", engine.sourceStrength(ctl, 600.0) < 0.02)
     }
 
     @Test
-    fun anEngineOnStationServiceDiesWhenTheBusGoes() {
-        // Run the engine directly so the bus supply can be taken away outright.
+    fun anEngineOnStationServiceDiesWhenTheGridGoes() {
+        // Drive the engine and the internal bus directly, so the grid can be
+        // taken away outright without waiting for the whole system to collapse.
         val engine = Engine()
+        val service = Service()
         val ctl = Controls()
         ctl.ignition = IgnitionMode.GRID
         ctl.throttle = 0.5
@@ -156,31 +159,51 @@ class SimTest {
         engine.jacketTempC = 78.0
         engine.busSupplyPu = 1.0
 
-        repeat(240) { engine.step(1.0 / 60.0, ctl, 600.0) }
+        fun tick() {
+            service.step(1.0 / 60.0, ctl, engine.sourceStrength(ctl, 600.0), Service.CAPACITY_GRID_KW)
+            engine.serviceVolts = service.volts
+            engine.ignitionLive = service.isRunning(Service.IGNITION)
+            engine.waterPumpRunning = service.isRunning(Service.PUMP)
+            engine.step(1.0 / 60.0, ctl, 600.0)
+        }
+
+        repeat(240) { tick() }
         assertTrue("should be firing on station service, was ${engine.firingSuccess}", engine.firingSuccess > 0.7)
 
         engine.busSupplyPu = 0.0
-        repeat(120) { engine.step(1.0 / 60.0, ctl, 600.0) }
-        assertTrue("with the bus gone there is no ignition left", engine.firingSuccess < 0.05)
+        repeat(120) { tick() }
+        assertTrue("with the grid gone there is no ignition left", engine.firingSuccess < 0.05)
     }
 
     @Test
-    fun theBatteryIsStrongAtCrankingAndFadesAtSpeed() {
+    fun theBatteryCoilBoxFadesAsTheRevolutionsRise() {
         val p = Plant(2)
         p.ctl.ignition = IgnitionMode.EMG
-        assertTrue("the battery must fire at cranking speed", p.engine.sparkEnergy(p.ctl, 90.0) > 0.9)
-        assertTrue(
-            "and must fade at working speed",
-            p.engine.sparkEnergy(p.ctl, 600.0) < p.engine.sparkEnergy(p.ctl, 90.0) * 0.85
-        )
+        // The cells hold their volts whatever the engine is doing...
+        assertTrue("full cells are full volts", p.engine.sourceStrength(p.ctl, 90.0) > 0.95)
+        assertTrue("at any speed", p.engine.sourceStrength(p.ctl, 600.0) > 0.95)
+        // ...but the coil box runs out of dwell, so the spark falls away.
+        assertTrue("coil good at cranking speed", p.engine.coilDwellFade(90.0) > 0.95)
+        assertTrue("coil poor at working speed", p.engine.coilDwellFade(600.0) < 0.80)
     }
 
     @Test
-    fun theOffPositionGivesNoSparkAtAll() {
+    fun flatCellsLoseTheirVoltsAltogether() {
+        val p = Plant(2)
+        p.ctl.ignition = IgnitionMode.EMG
+        p.engine.batteryCharge = 0.60
+        assertTrue("half down is still good volts", p.engine.sourceStrength(p.ctl, 0.0) > 0.9)
+        p.engine.batteryCharge = 0.05
+        assertTrue("nearly flat falls off a cliff", p.engine.sourceStrength(p.ctl, 0.0) < 0.35)
+    }
+
+    @Test
+    fun theOffPositionGivesNothingAtAll() {
         val p = Plant(2)
         p.ctl.ignition = IgnitionMode.OFF
-        assertEquals("OFF must give no spark", 0.0, p.engine.sparkEnergy(p.ctl, 600.0), 1e-9)
-        assertEquals(0.0, p.engine.sparkEnergy(p.ctl, 90.0), 1e-9)
+        run(p, 1.0)
+        assertEquals("OFF must leave the internal bus dead", 0.0, p.service.volts, 1e-9)
+        assertEquals("and no spark", 0.0, p.engine.sparkEnergy(p.ctl, 600.0), 1e-9)
     }
 
     @Test
@@ -288,13 +311,13 @@ class SimTest {
     private fun synchronise(p: Plant): Boolean {
         // Trim to a whisker above the bus so the scope creeps slowly forward.
         run(p, 50.0) { pl ->
-            tend(pl, pl.grid.busHz + 0.10)
+            tend(pl, pl.grid.hz + 0.10)
             matchVolts(pl)
         }
         val dt = 1.0 / 240.0
         var guard = 0
         while (guard++ < 60000 && !p.ended) {
-            tend(p, p.grid.busHz + 0.10, dt)
+            tend(p, p.grid.hz + 0.10, dt)
             matchVolts(p, dt)
             p.step(dt)
             if (abs(p.syncPhase) < 0.06 && abs(p.slipHz) < 0.30) {
@@ -312,12 +335,17 @@ class SimTest {
         assertTrue("breaker should have closed", synchronise(p))
         assertTrue("a clean close must not hurt anything", p.couplingDamage < 0.01)
 
-        // Pick up the rest of the town and hold the cycles while doing it.
-        p.toggleFeeder(1)
-        p.toggleFeeder(3)
-        run(p, 60.0) { tend(it) }
-        assertTrue("should be exporting power, was ${p.outputKw} kW", p.outputKw > 15.0)
-        assertTrue("cycles must stay in hand, bus at ${p.grid.busHz}", abs(p.grid.busHz - 60.0) < 1.2)
+        // Wind the throttle up to meet the dispatcher's order.
+        run(p, 60.0) { pl ->
+            trim(pl)
+            val err = pl.grid.dispatchKw() - pl.outputKw
+            pl.ctl.throttle = (pl.ctl.throttle + err * 0.0012 / 60.0 * 60.0).coerceIn(0.0, 1.0)
+        }
+        assertTrue("should be exporting power, was ${p.outputKw} kW", p.outputKw > 25.0)
+        assertTrue(
+            "should be near the order of ${p.grid.dispatchKw()} kW, was ${p.outputKw}",
+            abs(p.outputKw - p.grid.dispatchKw()) < 18.0
+        )
         assertEquals(Failure.NONE, p.failure)
     }
 
@@ -326,7 +354,7 @@ class SimTest {
         val p = Plant(7)
         assertTrue(startEngine(p))
         run(p, 50.0) { pl ->
-            tend(pl, pl.grid.busHz + 0.15)
+            tend(pl, pl.grid.hz + 0.15)
             matchVolts(pl)
         }
         var guard = 0
@@ -405,22 +433,83 @@ class SimTest {
     // ------------------------------------------------------------------ the town
 
     @Test
-    fun townDemandStepsEveryNinetySeconds() {
+    fun theDispatcherGivesANewOrderEveryNinetySeconds() {
         val p = Plant(11)
-        val first = p.grid.demandW
+        val first = p.grid.dispatchW
         run(p, 89.0)
-        assertEquals("demand must hold for the full 90 seconds", 0, p.grid.demandStep)
+        assertEquals("the order must hold for the full 90 seconds", 0, p.grid.dispatchStep)
         run(p, 8.0)
-        assertEquals(1, p.grid.demandStep)
-        assertTrue("the figure must actually move", abs(p.grid.demandW - first) > 2000.0)
+        assertEquals(1, p.grid.dispatchStep)
+        assertTrue("the figure must actually move", abs(p.grid.dispatchW - first) > 2000.0)
+    }
+
+    @Test
+    fun theGridIsStiffAndSetsTheFrequencyItself() {
+        val p = Plant(12)
+        // Nothing the unit does should shift a whole interconnection.
+        val readings = ArrayList<Double>()
+        run(p, 120.0) { readings.add(it.grid.hz) }
+        assertTrue("the system must stay near 60 cycles", readings.all { abs(it - 60.0) < 1.4 })
+        assertTrue("but it must not be perfectly still", readings.maxOrNull()!! - readings.minOrNull()!! > 0.05)
+    }
+
+    // ------------------------------------------------------------------ station service
+
+    @Test
+    fun theIgnitionIsFedFromTheInternalBus() {
+        val p = Plant(51)
+        p.ctl.ignition = IgnitionMode.GRID
+        run(p, 1.0)
+        assertTrue("ignition should be alive on station service", p.engine.sparkEnergy(p.ctl, 0.0) > 0.8)
+
+        // Pull the ignition switch out on the board and the plugs go dead.
+        p.toggleAux(Service.IGNITION)
+        run(p, 1.0)
+        assertEquals("no spark with the ignition switched out", 0.0, p.engine.sparkEnergy(p.ctl, 0.0), 1e-9)
+    }
+
+    @Test
+    fun theBatteryCannotCarryTheWholeBoard() {
+        val p = Plant(52)
+        p.ctl.ignition = IgnitionMode.EMG
+        // Everything switched in at once is more than the cells will carry.
+        p.ctl.auxClosed[Service.CHARGER] = true
+        p.ctl.auxClosed[Service.LIGHTS] = true
+        run(p, 2.0)
+        assertTrue("the internal bus should be overloaded", p.service.overloaded)
+        assertTrue("and its volts should have sagged", p.service.volts < 0.8)
+
+        // Shed the charger and the lights and it comes back up.
+        p.ctl.auxClosed[Service.CHARGER] = false
+        p.ctl.auxClosed[Service.LIGHTS] = false
+        run(p, 2.0)
+        assertTrue("shedding load must restore the bus", !p.service.overloaded)
+        assertTrue("volts back up, was ${p.service.volts}", p.service.volts > 0.9)
+    }
+
+    @Test
+    fun losingTheWaterPumpCooksTheEngineEvenWithTheGateOpen() {
+        val p = Plant(53)
+        assertTrue(startEngine(p))
+        p.ctl.waterValve = 1.0            // gate wide open, but the pump is switched out
+        run(p, 400.0) { pl ->
+            trim(pl)
+            holdSpeed(pl, 60.0)
+            pl.ctl.waterValve = 1.0
+            pl.ctl.auxClosed[Service.PUMP] = false
+        }
+        assertTrue(
+            "with no circulating pump the engine must cook, ended with ${p.failure}",
+            p.failure == Failure.OVERHEAT_SEIZED || p.failure == Failure.PISTON_HOLED
+        )
     }
 
     @Test
     fun synchronisingLampsGoDarkOnlyAtCoincidence() {
-        val p = Plant(12)
+        val p = Plant(14)
         assertTrue(startEngine(p))
         run(p, 50.0) { pl ->
-            tend(pl, pl.grid.busHz + 0.15)
+            tend(pl, pl.grid.hz + 0.15)
             matchVolts(pl)
         }
         var minB = 1.0

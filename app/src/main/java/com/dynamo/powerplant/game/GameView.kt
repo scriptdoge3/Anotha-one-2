@@ -229,8 +229,8 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
         val p = plant
         if (l.mainBreaker.contains(x, y)) { p.toggleBreaker(); audio.clunk(); return }
         if (l.fieldSwitch.contains(x, y)) { p.ctl.fieldSwitchClosed = !p.ctl.fieldSwitchClosed; audio.clunk(); return }
-        for (i in l.feeders.indices) {
-            if (l.feeders[i].contains(x, y)) { p.toggleFeeder(i); audio.clunk(); return }
+        for (i in l.auxSwitches.indices) {
+            if (l.auxSwitches[i].contains(x, y)) { p.toggleAux(i); audio.clunk(); return }
         }
     }
 

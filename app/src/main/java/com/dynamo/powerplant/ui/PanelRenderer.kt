@@ -199,8 +199,8 @@ class PanelRenderer(val L: Layout) {
     /** How much light there is in the room to read the board by. */
     fun ambientFor(p: Plant): Float {
         val standby = 0.42f      // the emergency oil lamps over the board
-        val house = if (p.grid.busVolts > Spec.RATED_VOLTS * 0.55) {
-            (p.grid.busVolts / Spec.RATED_VOLTS).coerceIn(0f.toDouble(), 1.15).toFloat() * 0.55f
+        val house = if (p.grid.volts > Spec.RATED_VOLTS * 0.55) {
+            (p.grid.volts / Spec.RATED_VOLTS).coerceIn(0f.toDouble(), 1.15).toFloat() * 0.55f
         } else 0f
         val panel = p.panelLampLevel().toFloat() * 0.30f
         return (standby + house + panel).coerceIn(0.45f, 1.0f)
@@ -274,8 +274,8 @@ class PanelRenderer(val L: Layout) {
         val wants = if (other == Tab.CONTROL) {
             p.engine.oilFilm < 0.5 || p.engine.jacketTempC > 105 || p.rpm > Spec.OVERSPEED_RPM
         } else {
-            p.grid.feeders.any { it.fuseBlown } || p.outputKw < -4.0 ||
-                abs(p.grid.busHz - 60.0) > 1.6
+            p.service.loads.any { it.fuseBlown } || p.service.overloaded ||
+                p.outputKw < -4.0 || abs(p.outputKw - p.grid.dispatchKw()) > 14.0
         }
         if (wants) {
             val r = L.tabRect(other.ordinal)
@@ -290,7 +290,7 @@ class PanelRenderer(val L: Layout) {
             c, p.clockText(), right, h.centerY() - h.height() * 0.10f,
             h.height() * 0.30f, Theme.dim(Theme.NICKEL_LIT, ambient), Paint.Align.RIGHT
         )
-        val kw = p.grid.demandW / 1000.0
+        val kw = p.grid.dispatchKw()
         val secs = p.grid.secondsToChange
         Theme.engrave(
             c, "TOWN LOAD %.0f KW   NEXT IN %02d".format(kw, secs.toInt()), right,
@@ -306,7 +306,7 @@ class PanelRenderer(val L: Layout) {
 
         freqDial.drawNeedle(c, p.hz, ambient)
         // A second, red pointer showing where the bus actually is.
-        freqDial.drawNeedle(c, p.grid.busHz, ambient, Theme.ACCENT)
+        freqDial.drawNeedle(c, p.grid.hz, ambient, Theme.ACCENT)
         Theme.dialGlass(c, L.freqDial.x, L.freqDial.y, L.bigR)
 
         val lampB = p.lampBrightness().toFloat()
@@ -316,7 +316,7 @@ class PanelRenderer(val L: Layout) {
 
         genVoltsDial.drawNeedle(c, p.genVolts, ambient)
         Theme.dialGlass(c, L.genVolts.x, L.genVolts.y, L.smallR)
-        busVoltsDial.drawNeedle(c, p.grid.busVolts, ambient)
+        busVoltsDial.drawNeedle(c, p.grid.volts, ambient)
         Theme.dialGlass(c, L.busVolts.x, L.busVolts.y, L.smallR)
         wattDial.drawNeedle(c, p.outputKw, ambient)
         Theme.dialGlass(c, L.wattmeter.x, L.wattmeter.y, L.smallR)
@@ -397,13 +397,12 @@ class PanelRenderer(val L: Layout) {
             c, L.fieldSwitch, if (p.ctl.fieldSwitchClosed) 1f else 0f, "FIELD", "", ambient,
             live = p.gen.fieldFlux > 0.05
         )
-        for (i in L.feeders.indices) {
-            val f = p.grid.feeders[i]
-            val closed = p.ctl.feederClosed[i] && !f.fuseBlown
+        for (i in L.auxSwitches.indices) {
+            val l = p.service.loads[i]
             Widgets.knifeSwitch(
-                c, L.feeders[i], if (p.ctl.feederClosed[i]) 1f else 0f, f.shortName,
-                if (f.fuseBlown) "FUSE OUT" else "%.0f A".format(f.amps), ambient,
-                blown = f.fuseBlown, live = closed && p.grid.busVolts > 500
+                c, L.auxSwitches[i], if (p.ctl.auxClosed[i]) 1f else 0f, l.shortName,
+                if (l.fuseBlown) "FUSE OUT" else "%.1f kW".format(l.kw), ambient,
+                blown = l.fuseBlown, live = l.running
             )
         }
     }
@@ -418,7 +417,7 @@ class PanelRenderer(val L: Layout) {
             if (e.knockIndex > 0.45) flash else if (e.knockIndex > 0.22) 0.55f else 0f,
             if (p.outputKw < -4.0) flash else 0f,
             if (!p.ctl.fieldSwitchClosed || p.gen.fieldFlux < 0.04) 0.65f else 0f,
-            if (p.grid.feeders.any { it.fuseBlown }) flash else 0f,
+            if (p.service.loads.any { it.fuseBlown } || p.service.overloaded) flash else 0f,
             if (e.batteryCharge < 0.12) flash else if (e.batteryCharge < 0.30) 0.55f else 0f
         )
         for (i in states.indices) {
@@ -448,9 +447,8 @@ class PanelRenderer(val L: Layout) {
         if (lineText.isNotEmpty()) lines.add(lineText)
 
         val rows = listOf(
-            "CURRENT DELIVERED" to "%.1f kWh".format(p.grid.energyDeliveredKwh),
-            "NOT SERVED" to "%.1f kWh".format(p.grid.unservedKwh),
-            "BROWNOUT" to "%.0f sec".format(p.grid.brownoutSeconds),
+            "EXPORTED" to "%.1f kWh".format(p.grid.energyExportedKwh),
+            "OFF ORDER" to "%.0f sec".format(p.grid.secondsOffOrder),
             "PEAK OUTPUT" to "%.0f kW".format(p.peakOutputKw),
             "ON THE BOARDS" to "%.0f min".format(p.shiftSeconds / 60.0)
         )
