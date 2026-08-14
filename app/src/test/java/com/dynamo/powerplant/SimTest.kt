@@ -423,6 +423,49 @@ class SimTest {
     }
 
     @Test
+    fun theEmergencyBreakerIsTheRoadBackToTheCells() {
+        val p = Plant(91)
+        assertTrue(startEngine(p))
+        // Bring the field up so the machine actually makes volts; with no
+        // excitation the output of the main transformer is dead and there is
+        // nothing to charge from.
+        p.ctl.excitation = 0.60
+        run(p, 8.0) { tend(it) }
+        assertTrue("the transformer output should be alive", p.mainTransformerLive())
+
+        // Running on the machine with the charging set switched in, the cells
+        // should be going back up through the emergency breaker.
+        p.ctl.auxClosed[Service.CHARGER] = true
+        p.engine.batteryCharge = 0.50
+        run(p, 5.0) { tend(it) }
+        assertTrue("the charging set should be working", p.engine.batteryChargingNow)
+        val rising = p.engine.batteryCharge
+        run(p, 20.0) { tend(it) }
+        assertTrue("and the cells should be coming up", p.engine.batteryCharge > rising)
+
+        // Open the emergency breaker and that road is cut, whatever the board says.
+        p.ctl.emergencyBreakerClosed = false
+        run(p, 5.0) { tend(it) }
+        assertTrue("with the breaker open nothing can charge", !p.engine.batteryChargingNow)
+        val held = p.engine.batteryCharge
+        run(p, 20.0) { tend(it) }
+        assertTrue("and the cells must not rise", p.engine.batteryCharge <= held + 1e-6)
+    }
+
+    @Test
+    fun theTransformerOutputMustBeAliveToCharge() {
+        val p = Plant(92)
+        // Stone cold, nothing turning and the unit breaker open: the output of
+        // the main transformer is dead, so there is nothing to charge from.
+        p.ctl.ignition = IgnitionMode.GRID
+        p.ctl.auxClosed[Service.CHARGER] = true
+        p.engine.batteryCharge = 0.50
+        run(p, 4.0)
+        assertTrue("a dead transformer output cannot charge", !p.engine.batteryChargingNow)
+        assertTrue("and the output should read dead", !p.mainTransformerLive())
+    }
+
+    @Test
     fun theDispatcherGivesANewOrderEveryNinetySeconds() {
         val p = Plant(11)
         val first = p.grid.dispatchW

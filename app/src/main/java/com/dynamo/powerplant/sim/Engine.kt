@@ -44,6 +44,8 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     var ignitionLive: Boolean = true
     var waterPumpRunning: Boolean = false
     var chargerRunning: Boolean = false
+    /** True when the output of the main transformer has volts on it. */
+    var mainTransformerLive: Boolean = false
     /** Kilowatts the internal bus is drawing, for the battery drain. */
     var serviceDrawKw: Double = 0.0
 
@@ -241,9 +243,12 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
             // Everything switched onto the bus is coming out of the cells.
             batteryCharge = max(0.0, batteryCharge - dt * 0.0016 * (1.0 + serviceDrawKw * 0.28))
         }
-        // The charging set is a switched load on the internal bus, and it cannot
-        // put anything back while the bus is being fed by the battery itself.
-        val canCharge = chargerRunning && ctl.ignition != IgnitionMode.EMG
+        // The charging set is a switched load on the internal bus. It cannot put
+        // anything back while the bus is being fed by the battery itself, nor
+        // with the emergency breaker open, because that is the road the charge
+        // takes back to the output of the main transformer.
+        val canCharge = chargerRunning && ctl.ignition != IgnitionMode.EMG &&
+            ctl.emergencyBreakerClosed && mainTransformerLive
         batteryChargingNow = canCharge && batteryCharge < 0.999
         if (batteryChargingNow) {
             batteryCharge = min(1.0, batteryCharge + dt * 0.013 * clamp(serviceVolts, 0.0, 1.0))
@@ -346,7 +351,7 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         batteryCharge = 1.0; plugFouling = 0.0; floodLevel = 0.0; firingSuccess = 0.0
         busSupplyPu = 1.0
         serviceVolts = 0.0; ignitionLive = true; waterPumpRunning = false
-        chargerRunning = false; serviceDrawKw = 0.0
+        chargerRunning = false; mainTransformerLive = false; serviceDrawKw = 0.0
         knockIndex = 0.0; knockDamage = 0.0; bearingWear = 0.0
         starterEngaged = false; starterCranking = false; starterHeat = 0.0
         batteryChargingNow = false

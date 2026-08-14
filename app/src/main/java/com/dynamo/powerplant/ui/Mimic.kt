@@ -7,32 +7,38 @@ import android.graphics.RectF
 import com.dynamo.powerplant.sim.IgnitionMode
 import com.dynamo.powerplant.sim.Plant
 import com.dynamo.powerplant.sim.Spec
-import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
 
 /**
- * The mimic diagram: the single line of the station drawn on the switchboard so
- * you can see at a glance what is connected to what. Boards of the period had
- * exactly this, laid out in brass strip let into the slate.
+ * The mimic diagram let into the switchboard, drawn the way a real control room
+ * panel is: the single line coloured by voltage level, black nameplates against
+ * every piece of apparatus, and a lamp at each switching device showing green
+ * when it is made and red when it is open.
  *
- * Live conductors are drawn bright with current running along them; dead ones
- * are dark. Contacts show as a break in the line when they are open.
+ * The station reads top to bottom:
+ *
+ *   grid  ->  unit breaker  ->  main transformer output  ->  main transformer
+ *             ->  generator
+ *
+ * and the emergency circuit hangs off that transformer output: down through the
+ * emergency breaker, through the battery, and into the station service bus.
  */
 object Mimic {
 
-    /** Where each piece of apparatus sits, as a fraction of the mimic rectangle. */
-    private const val BUS_Y = 0.155f
-    private const val GEN_X = 0.150f
-    private const val MAIN_TX_Y = 0.360f
-    private const val BREAKER_Y = 0.540f
-    private const val GEN_Y = 0.700f
-    private const val START_TX_X = 0.400f
+    // Where each piece of apparatus sits, as a fraction of the mimic rectangle.
+    private const val BUS_Y = 0.135f
+    private const val UNIT_X = 0.185f
+    private const val UNIT_BKR_Y = 0.280f
+    private const val TX_OUT_Y = 0.390f
+    private const val MAIN_TX_Y = 0.515f
+    private const val GEN_Y = 0.665f
+    private const val EMG_X = 0.400f
+    private const val EMG_BKR_Y = 0.505f
+    private const val BATT_Y = 0.680f
+    private const val START_X = 0.645f
     private const val START_TX_Y = 0.420f
-    private const val SERVICE_Y = 0.800f
-    private const val BATT_X = 0.860f
-    private const val BATT_Y = 0.900f
+    private const val SERVICE_Y = 0.822f
     private const val LOAD_Y = 0.940f
 
     fun draw(c: Canvas, r: RectF, p: Plant, ambient: Float, phase: Float) {
@@ -40,19 +46,15 @@ object Mimic {
         fun y(f: Float) = r.top + r.height() * f
 
         Theme.boardPanel(c, r, seed = 3)
-        val unit = minOf(r.width() * 0.020f, r.height() * 0.055f)
-
-        Theme.engrave(
-            c, "STATION SINGLE LINE", r.left + r.width() * 0.5f, r.top + unit * 1.30f,
-            unit * 0.95f, Theme.dim(Theme.MARK_SOFT, ambient)
-        )
+        val u = minOf(r.width() * 0.019f, r.height() * 0.050f)
 
         // ---- what is alive -----------------------------------------------------
         val gridLive = p.grid.volts > Spec.RATED_VOLTS * 0.45
         val genLive = p.gen.emf(p.rpm) > Spec.RATED_VOLTS * 0.15
         val tied = p.ctl.mainBreakerClosed
+        val txOutLive = p.mainTransformerLive()
+        val emgClosed = p.ctl.emergencyBreakerClosed
         val sel = p.ctl.ignition
-
         val strength = p.engine.sourceStrength(p.ctl, p.rpm)
         val gridService = sel == IgnitionMode.GRID && strength > 0.02
         val genService = sel == IgnitionMode.GEN && strength > 0.02
@@ -60,98 +62,128 @@ object Mimic {
         val serviceLive = p.service.volts > 0.05
         val charging = p.engine.batteryChargingNow
 
-        // ---- the transmission line ---------------------------------------------
-        busBar(c, x(0.055f), x(0.945f), y(BUS_Y), unit, gridLive, ambient, phase, 0.55f)
-        label(c, "GRID  2300 V", x(0.300f), y(BUS_Y) - unit * 1.05f, unit * 0.80f, ambient, Paint.Align.LEFT)
-
-        val inX = x(0.075f)
-        conductor(c, inX, y(0.045f), inX, y(BUS_Y), unit, gridLive, ambient, phase, 0.35f)
-        box(c, RectF(inX - unit * 3.4f, y(0.010f) - unit * 0.95f, inX + unit * 3.4f, y(0.010f) + unit * 0.95f),
-            "INTERCONNECTION", unit * 0.68f, gridLive, ambient)
-
-        // ---- the unit: generator, main transformer, unit breaker ---------------
-        val gx = x(GEN_X)
-        conductor(c, gx, y(BUS_Y), gx, y(MAIN_TX_Y) - unit * 1.5f, unit, gridLive, ambient, phase, 0.35f)
-        transformer(c, gx, y(MAIN_TX_Y), unit * 1.5f, tied && genLive, ambient)
-        label(c, "MAIN", gx + unit * 2.4f, y(MAIN_TX_Y) + unit * 0.35f, unit * 0.72f, ambient, Paint.Align.LEFT)
-
-        conductor(c, gx, y(MAIN_TX_Y) + unit * 1.5f, gx, y(BREAKER_Y) - unit * 1.1f, unit, tied && genLive, ambient, phase, 0.35f)
-        contact(c, gx, y(BREAKER_Y), unit * 1.1f, tied, ambient, vertical = true)
-        label(c, "UNIT BKR", gx + unit * 2.0f, y(BREAKER_Y) + unit * 0.35f, unit * 0.70f, ambient, Paint.Align.LEFT)
-
-        conductor(c, gx, y(BREAKER_Y) + unit * 1.1f, gx, y(GEN_Y) - unit * 1.7f, unit, tied && genLive, ambient, phase, 0.35f)
-        machine(c, gx, y(GEN_Y), unit * 1.7f, genLive, ambient)
-
-        // ---- station service: three sources into one internal bus --------------
-        val serviceLeft = x(0.255f)
-        val serviceRight = x(0.930f)
-        busBar(c, serviceLeft, serviceRight, y(SERVICE_Y), unit * 0.8f, serviceLive, ambient, phase, 0.40f)
-        val hdr = if (p.service.overloaded) "STATION SERVICE  OVERLOAD" else
-            "STATION SERVICE  %.1f / %.1f kW".format(p.service.demandKw, p.service.capacityKw)
         Theme.engrave(
-            c, hdr, serviceLeft, y(SERVICE_Y) - unit * 1.05f, unit * 0.72f,
+            c, "STATION SINGLE LINE", r.centerX(), r.top + u * 1.35f,
+            u * 0.92f, Theme.dim(Theme.MARK_SOFT, ambient)
+        )
+
+        // ================= high tension: the grid and the unit =================
+        val hv = level(Theme.HV_LIVE, Theme.HV_DEAD, gridLive, ambient)
+        bar(c, x(0.050f), x(0.950f), y(BUS_Y), u * 0.95f, hv, gridLive, phase, 0.5f, ambient)
+        Theme.miniPlate(c, x(0.300f), y(BUS_Y) - u * 1.9f, "GRID  2300 V", u * 0.62f, ambient)
+
+        val inX = x(0.078f)
+        run(c, inX, y(0.040f), inX, y(BUS_Y), u * 0.62f, hv, gridLive, phase, 0.4f, ambient)
+        Theme.miniPlate(c, inX + u * 4.6f, y(0.040f), "INTERCONNECTION", u * 0.60f, ambient)
+
+        val ux = x(UNIT_X)
+        // grid bus down to the unit breaker
+        run(c, ux, y(BUS_Y), ux, y(UNIT_BKR_Y) - u * 1.0f, u * 0.62f, hv, gridLive, phase, 0.4f, ambient)
+        device(c, ux, y(UNIT_BKR_Y), u, tied, hv, ambient)
+        Theme.miniPlate(c, ux + u * 4.0f, y(UNIT_BKR_Y), "UNIT BREAKER", u * 0.60f, ambient)
+
+        // the output of the main transformer: the node the emergency circuit hangs off
+        val outLive = txOutLive
+        val hvOut = level(Theme.HV_LIVE, Theme.HV_DEAD, outLive, ambient)
+        run(c, ux, y(UNIT_BKR_Y) + u * 1.0f, ux, y(MAIN_TX_Y) - u * 1.4f, u * 0.62f, hvOut, outLive, phase, 0.4f, ambient)
+        node(c, ux, y(TX_OUT_Y), u * 0.46f, hvOut)
+        Theme.miniPlate(c, ux - u * 5.0f, y(TX_OUT_Y), "TX OUTPUT", u * 0.56f, ambient)
+
+        transformer(c, ux, y(MAIN_TX_Y), u * 1.4f, hvOut, ambient)
+        Theme.miniPlate(c, ux + u * 4.0f, y(MAIN_TX_Y), "MAIN TRANSFORMER", u * 0.60f, ambient)
+
+        // ================= generator voltage ===================================
+        val ac = level(Theme.AC_LIVE, Theme.AC_DEAD, genLive, ambient)
+        run(c, ux, y(MAIN_TX_Y) + u * 1.4f, ux, y(GEN_Y) - u * 1.6f, u * 0.62f, ac, genLive, phase, 0.4f, ambient)
+        machine(c, ux, y(GEN_Y), u * 1.6f, ac, ambient)
+        Theme.miniPlate(c, ux + u * 4.2f, y(GEN_Y), "GENERATOR  500 kW", u * 0.60f, ambient)
+
+        // ================= emergency circuit ===================================
+        // Off the transformer output, through the emergency breaker, through the
+        // battery, and into the station service bus.
+        run(c, ux, y(TX_OUT_Y), x(EMG_X), y(TX_OUT_Y), u * 0.62f, hvOut, outLive, phase, 0.4f, ambient)
+        val ex = x(EMG_X)
+        run(c, ex, y(TX_OUT_Y), ex, y(EMG_BKR_Y) - u * 1.0f, u * 0.62f, hvOut, outLive, phase, 0.4f, ambient)
+        device(c, ex, y(EMG_BKR_Y), u, emgClosed, hvOut, ambient)
+        Theme.miniPlate(c, ex + u * 4.4f, y(EMG_BKR_Y), "EMERGENCY BREAKER", u * 0.58f, ambient)
+
+        val chargePath = emgClosed && outLive && charging
+        val dc = level(Theme.DC_LIVE, Theme.DC_DEAD, chargePath || battService, ambient)
+        run(
+            c, ex, y(EMG_BKR_Y) + u * 1.0f, ex, y(BATT_Y) - u * 1.55f, u * 0.62f, dc,
+            chargePath, phase, -0.4f, ambient
+        )
+        battery(c, ex, y(BATT_Y), u * 1.55f, p.engine.batteryCharge.toFloat(), dc, battService, chargePath, ambient)
+        Theme.miniPlate(c, ex + u * 4.2f, y(BATT_Y), "BATTERY", u * 0.60f, ambient)
+        run(
+            c, ex, y(BATT_Y) + u * 1.55f, ex, y(SERVICE_Y) - u * 2.15f, u * 0.62f, dc,
+            battService, phase, 0.4f, ambient
+        )
+        tap(c, ex, y(SERVICE_Y) - u * 1.35f, u * 0.78f, battService, dc, ambient)
+        run(c, ex, y(SERVICE_Y) - u * 0.57f, ex, y(SERVICE_Y), u * 0.62f, dc, battService, phase, 0.4f, ambient)
+
+        // ================= station service =====================================
+        val svc = level(Theme.AC_LIVE, Theme.AC_DEAD, serviceLive, ambient)
+        bar(c, x(0.115f), x(0.945f), y(SERVICE_Y), u * 0.80f, svc, serviceLive, phase, 0.4f, ambient)
+        val hdr = if (p.service.overloaded) "STATION SERVICE   OVERLOAD"
+        else "STATION SERVICE   %.1f / %.1f kW".format(p.service.demandKw, p.service.capacityKw)
+        Theme.engrave(
+            c, hdr, x(0.120f), y(SERVICE_Y) + u * 1.85f, u * 0.66f,
             Theme.dim(if (p.service.overloaded) Theme.DANGER else Theme.MARK_SOFT, ambient),
             Paint.Align.LEFT
         )
 
-        // GEN tap, off the machine terminals
-        val genTapX = x(0.275f)
-        conductor(c, gx, y(GEN_Y), genTapX, y(GEN_Y), unit * 0.8f, genService, ambient, phase, 0.30f)
-        conductor(c, genTapX, y(GEN_Y), genTapX, y(SERVICE_Y) + unit * 1.0f, unit * 0.8f, genService, ambient, phase, 0.30f)
-        contact(c, genTapX, y(SERVICE_Y) + unit * 0.5f, unit * 0.85f, genService, ambient, vertical = true)
+        // the machine's own tap into station service
+        val genTap = level(Theme.AC_LIVE, Theme.AC_DEAD, genService, ambient)
+        run(c, ux, y(GEN_Y) + u * 1.6f, ux, y(SERVICE_Y) - u * 2.15f, u * 0.62f, genTap, genService, phase, 0.4f, ambient)
+        tap(c, ux, y(SERVICE_Y) - u * 1.35f, u * 0.78f, genService, genTap, ambient)
+        run(c, ux, y(SERVICE_Y) - u * 0.57f, ux, y(SERVICE_Y), u * 0.62f, genTap, genService, phase, 0.4f, ambient)
 
-        // GRID tap, down through the starting transformer
-        val sx = x(START_TX_X)
-        conductor(c, sx, y(BUS_Y), sx, y(START_TX_Y) - unit * 1.3f, unit * 0.8f, gridLive, ambient, phase, 0.30f)
-        transformer(c, sx, y(START_TX_Y), unit * 1.3f, gridService, ambient)
-        label(c, "STARTING", sx + unit * 2.1f, y(START_TX_Y) + unit * 0.30f, unit * 0.70f, ambient, Paint.Align.LEFT)
-        conductor(c, sx, y(START_TX_Y) + unit * 1.3f, sx, y(SERVICE_Y) - unit * 1.0f, unit * 0.8f, gridService, ambient, phase, 0.30f)
-        contact(c, sx, y(SERVICE_Y) - unit * 0.5f, unit * 0.85f, gridService, ambient, vertical = true)
+        // the grid's tap, down through the starting transformer
+        val sx = x(START_X)
+        run(c, sx, y(BUS_Y), sx, y(START_TX_Y) - u * 1.25f, u * 0.62f, hv, gridLive, phase, 0.4f, ambient)
+        val startCol = level(Theme.AC_LIVE, Theme.AC_DEAD, gridService, ambient)
+        transformer(c, sx, y(START_TX_Y), u * 1.25f, startCol, ambient)
+        Theme.miniPlate(c, sx + u * 4.6f, y(START_TX_Y), "STARTING TRANSFORMER", u * 0.56f, ambient)
+        run(c, sx, y(START_TX_Y) + u * 1.25f, sx, y(SERVICE_Y) - u * 2.15f, u * 0.62f, startCol, gridService, phase, 0.4f, ambient)
+        tap(c, sx, y(SERVICE_Y) - u * 1.35f, u * 0.78f, gridService, startCol, ambient)
+        run(c, sx, y(SERVICE_Y) - u * 0.57f, sx, y(SERVICE_Y), u * 0.62f, startCol, gridService, phase, 0.4f, ambient)
 
-        // EMG tap, the battery, which the charging set also feeds back into
-        val bx = x(BATT_X)
-        conductor(c, bx, y(SERVICE_Y), bx, y(BATT_Y) - unit * 1.2f, unit * 0.8f, battService || charging, ambient,
-            phase, if (charging && !battService) -0.30f else 0.30f)
-        contact(c, bx, y(SERVICE_Y) + unit * 1.1f, unit * 0.85f, true, ambient, vertical = true)
-        battery(c, bx, y(BATT_Y), unit * 1.2f, p.engine.batteryCharge.toFloat(), battService, charging, ambient)
-
-        // ---- the internal loads hanging off the service bus --------------------
+        // ================= the internal loads ==================================
         for (i in p.service.loads.indices) {
             val l = p.service.loads[i]
-            val lx = x(0.335f + i * 0.098f)
-            val switched = p.ctl.auxClosed[i] && !l.fuseBlown
-            conductor(c, lx, y(SERVICE_Y), lx, y(LOAD_Y) - unit * 1.6f, unit * 0.7f, l.running, ambient, phase, 0.30f)
-            contact(c, lx, y(LOAD_Y) - unit * 2.2f, unit * 0.75f, switched, ambient, vertical = true)
-            fuseSymbol(c, lx, y(LOAD_Y) - unit * 0.6f, unit * 0.75f, l.fuseBlown, l.running, ambient)
-            label(c, l.shortName, lx, y(LOAD_Y) + unit * 1.15f, unit * 0.64f, ambient, Paint.Align.CENTER)
+            val lx = x(0.560f + i * 0.105f)
+            val col = level(Theme.AC_LIVE, Theme.AC_DEAD, l.running, ambient)
+            run(c, lx, y(SERVICE_Y), lx, y(LOAD_Y) - u * 2.0f, u * 0.55f, col, l.running, phase, 0.4f, ambient)
+            device(c, lx, y(LOAD_Y) - u * 1.35f, u * 0.72f, p.ctl.auxClosed[i] && !l.fuseBlown, col, ambient)
+            fuseSymbol(c, lx, y(LOAD_Y) - u * 0.05f, u * 0.62f, l.fuseBlown, col, ambient)
+            Theme.miniPlate(c, lx, y(LOAD_Y) + u * 1.35f, l.shortName, u * 0.56f, ambient)
         }
     }
 
     // ------------------------------------------------------------------ pieces
 
-    private fun label(
-        c: Canvas, s: String, x: Float, y: Float, size: Float, ambient: Float, align: Paint.Align
-    ) = Theme.engrave(c, s, x, y, size, Theme.dim(Theme.MARK_SOFT, ambient), align)
+    /** The colour a run of conductor takes at this voltage level. */
+    private fun level(live: Int, dead: Int, energised: Boolean, ambient: Float): Int =
+        Theme.dim(if (energised) live else dead, ambient)
 
     /** A heavy horizontal bus bar. */
-    private fun busBar(
-        c: Canvas, x0: Float, x1: Float, y: Float, unit: Float, live: Boolean,
-        ambient: Float, phase: Float, speed: Float
+    private fun bar(
+        c: Canvas, x0: Float, x1: Float, y: Float, w: Float, color: Int,
+        live: Boolean, phase: Float, speed: Float, ambient: Float
     ) {
-        val w = unit * 0.85f
-        c.drawLine(x0, y, x1, y, Theme.line(Theme.dim(0xFF0C0F12.toInt(), ambient), w * 1.9f))
-        c.drawLine(x0, y, x1, y, Theme.line(Theme.dim(if (live) Theme.ACCENT else Theme.STEEL_DARK, ambient), w))
+        c.drawLine(x0, y, x1, y, Theme.line(Theme.dim(0xFF07090B.toInt(), ambient), w * 2.0f))
+        c.drawLine(x0, y, x1, y, Theme.line(color, w))
         if (live) flow(c, x0, y, x1, y, w, phase, speed, ambient)
     }
 
     /** A run of conductor between two points. */
-    private fun conductor(
-        c: Canvas, x0: Float, y0: Float, x1: Float, y1: Float, unit: Float, live: Boolean,
-        ambient: Float, phase: Float, speed: Float
+    private fun run(
+        c: Canvas, x0: Float, y0: Float, x1: Float, y1: Float, w: Float, color: Int,
+        live: Boolean, phase: Float, speed: Float, ambient: Float
     ) {
-        val w = unit * 0.55f
-        c.drawLine(x0, y0, x1, y1, Theme.line(Theme.dim(0xFF0C0F12.toInt(), ambient), w * 2.1f))
-        c.drawLine(x0, y0, x1, y1, Theme.line(Theme.dim(if (live) Theme.ACCENT else Theme.STEEL_DARK, ambient), w))
+        c.drawLine(x0, y0, x1, y1, Theme.line(Theme.dim(0xFF07090B.toInt(), ambient), w * 2.1f))
+        c.drawLine(x0, y0, x1, y1, Theme.line(color, w))
         if (live) flow(c, x0, y0, x1, y1, w, phase, speed, ambient)
     }
 
@@ -162,50 +194,73 @@ object Mimic {
     ) {
         val len = hypot(x1 - x0, y1 - y0)
         if (len < 1f) return
-        val step = w * 5.5f
+        val step = w * 7.0f
         val n = (len / step).toInt().coerceAtMost(40)
         if (n <= 0) return
         val dx = (x1 - x0) / len
         val dy = (y1 - y0) / len
-        val off = ((phase * speed * step * 8f) % step + step) % step
-        val paint = Theme.solid(Theme.withAlpha(Theme.LAMP_WHITE, (150 * ambient).toInt()))
+        val off = ((phase * speed * step * 7f) % step + step) % step
+        val paint = Theme.solid(Theme.withAlpha(Theme.LAMP_WHITE, (120 * ambient).toInt()))
         for (i in 0..n) {
             val d = off + i * step
-            if (d > len) break
-            c.drawCircle(x0 + dx * d, y0 + dy * d, w * 0.44f, paint)
+            if (d < 0f || d > len) continue
+            c.drawCircle(x0 + dx * d, y0 + dy * d, w * 0.40f, paint)
         }
     }
 
-    /** A pair of contacts, drawn closed or standing open. */
-    private fun contact(c: Canvas, cx: Float, cy: Float, half: Float, closed: Boolean, ambient: Float, vertical: Boolean) {
-        val col = Theme.dim(if (closed) Theme.ACCENT else Theme.STEEL, ambient)
-        if (vertical) {
-            c.drawCircle(cx, cy - half, half * 0.30f, Theme.solid(col))
-            c.drawCircle(cx, cy + half, half * 0.30f, Theme.solid(col))
-            if (closed) {
-                c.drawLine(cx, cy - half, cx, cy + half, Theme.line(col, half * 0.42f))
-            } else {
-                // the blade swung clear
-                c.drawLine(cx, cy - half, cx + half * 1.15f, cy + half * 0.30f, Theme.line(col, half * 0.42f))
-            }
-        }
+    /** A junction dot where conductors meet. */
+    private fun node(c: Canvas, cx: Float, cy: Float, r: Float, color: Int) {
+        c.drawCircle(cx, cy, r, Theme.solid(color))
     }
 
-    /** Two interlinked coils, the usual single-line symbol for a transformer. */
-    private fun transformer(c: Canvas, cx: Float, cy: Float, r: Float, live: Boolean, ambient: Float) {
-        val col = Theme.dim(if (live) Theme.ACCENT else Theme.STEEL, ambient)
-        val p = Theme.line(col, r * 0.20f)
-        c.drawCircle(cx, cy - r * 0.42f, r * 0.62f, Theme.solid(Theme.dim(0xFF101418.toInt(), ambient)))
-        c.drawCircle(cx, cy + r * 0.42f, r * 0.62f, Theme.solid(Theme.dim(0xFF101418.toInt(), ambient)))
+    /**
+     * A switching device: the square contact box that sits in the line, with the
+     * indicator lamp beside it that every mimic panel carries.
+     */
+    private fun device(c: Canvas, cx: Float, cy: Float, u: Float, closed: Boolean, color: Int, ambient: Float) {
+        val h = u * 0.95f
+        val w = u * 0.72f
+        val box = RectF(cx - w, cy - h, cx + w, cy + h)
+        c.drawRect(box, Theme.solid(Theme.dim(0xFF0B0E11.toInt(), ambient)))
+        c.drawRect(box, Theme.line(color, u * 0.26f))
+        if (closed) {
+            // the contacts made, so the line runs straight through
+            c.drawLine(cx, box.top, cx, box.bottom, Theme.line(color, u * 0.42f))
+        } else {
+            // drawn out of its jaws
+            c.drawLine(cx, box.top, cx + w * 0.72f, box.bottom, Theme.line(color, u * 0.34f))
+        }
+        Theme.lamp(
+            c, cx - u * 2.15f, cy, u * 0.52f,
+            if (closed) Theme.LAMP_GREEN else Theme.LAMP_RED, if (closed) 0.95f else 0.85f
+        )
+    }
+
+    /** A selector contact into the station service bus, with its own lamp. */
+    private fun tap(c: Canvas, cx: Float, cy: Float, r: Float, closed: Boolean, color: Int, ambient: Float) {
+        c.drawCircle(cx, cy - r, r * 0.34f, Theme.solid(color))
+        c.drawCircle(cx, cy + r, r * 0.34f, Theme.solid(color))
+        if (closed) c.drawLine(cx, cy - r, cx, cy + r, Theme.line(color, r * 0.46f))
+        else c.drawLine(cx, cy - r, cx + r * 1.20f, cy + r * 0.35f, Theme.line(color, r * 0.42f))
+        Theme.lamp(
+            c, cx - r * 2.5f, cy, r * 0.46f,
+            if (closed) Theme.LAMP_GREEN else Theme.LAMP_RED, if (closed) 0.95f else 0.80f
+        )
+    }
+
+    /** Two interlinked coils: the single-line symbol for a transformer. */
+    private fun transformer(c: Canvas, cx: Float, cy: Float, r: Float, color: Int, ambient: Float) {
+        val p = Theme.line(color, r * 0.22f)
+        c.drawCircle(cx, cy - r * 0.42f, r * 0.62f, Theme.solid(Theme.dim(0xFF0B0E11.toInt(), ambient)))
+        c.drawCircle(cx, cy + r * 0.42f, r * 0.62f, Theme.solid(Theme.dim(0xFF0B0E11.toInt(), ambient)))
         c.drawCircle(cx, cy - r * 0.42f, r * 0.62f, p)
         c.drawCircle(cx, cy + r * 0.42f, r * 0.62f, p)
     }
 
     /** The generator: a circle with a sine wave through it. */
-    private fun machine(c: Canvas, cx: Float, cy: Float, r: Float, live: Boolean, ambient: Float) {
-        val col = Theme.dim(if (live) Theme.ACCENT else Theme.STEEL, ambient)
-        c.drawCircle(cx, cy, r, Theme.solid(Theme.dim(0xFF101418.toInt(), ambient)))
-        c.drawCircle(cx, cy, r, Theme.line(col, r * 0.14f))
+    private fun machine(c: Canvas, cx: Float, cy: Float, r: Float, color: Int, ambient: Float) {
+        c.drawCircle(cx, cy, r, Theme.solid(Theme.dim(0xFF0B0E11.toInt(), ambient)))
+        c.drawCircle(cx, cy, r, Theme.line(color, r * 0.15f))
         val p = Path()
         val n = 24
         for (i in 0..n) {
@@ -214,61 +269,48 @@ object Mimic {
             val py = cy - sin(t * 2.0 * Math.PI).toFloat() * r * 0.34f
             if (i == 0) p.moveTo(px, py) else p.lineTo(px, py)
         }
-        c.drawPath(p, Theme.line(col, r * 0.13f))
-        Theme.engrave(c, "GEN", cx, cy + r * 1.75f, r * 0.52f, Theme.dim(Theme.MARK_SOFT, ambient))
+        c.drawPath(p, Theme.line(color, r * 0.13f))
     }
 
-    /** A battery: long and short plates, with its state of charge alongside. */
+    /** A battery: long and short plates, with its state of charge beneath. */
     private fun battery(
-        c: Canvas, cx: Float, cy: Float, r: Float, charge: Float,
+        c: Canvas, cx: Float, cy: Float, r: Float, charge: Float, color: Int,
         discharging: Boolean, charging: Boolean, ambient: Float
     ) {
-        val col = Theme.dim(
-            when {
-                discharging -> Theme.ACCENT
-                charging -> Theme.ACCENT_COOL
-                else -> Theme.STEEL
-            }, ambient
-        )
-        var y = cy - r * 0.75f
+        var y = cy - r * 0.66f
         for (i in 0 until 3) {
-            c.drawLine(cx - r * 0.80f, y, cx + r * 0.80f, y, Theme.line(col, r * 0.17f))
-            y += r * 0.36f
-            c.drawLine(cx - r * 0.38f, y, cx + r * 0.38f, y, Theme.line(col, r * 0.17f))
-            y += r * 0.36f
+            c.drawLine(cx - r * 0.85f, y, cx + r * 0.85f, y, Theme.line(color, r * 0.19f))
+            y += r * 0.33f
+            c.drawLine(cx - r * 0.40f, y, cx + r * 0.40f, y, Theme.line(color, r * 0.19f))
+            y += r * 0.33f
         }
-        val barW = r * 1.8f
-        val bar = RectF(cx - barW / 2, cy + r * 1.28f, cx + barW / 2, cy + r * 1.62f)
-        c.drawRoundRect(bar, bar.height() / 2, bar.height() / 2, Theme.solid(Theme.dim(0xFF0E1114.toInt(), ambient)))
-        val fillRect = RectF(bar.left + 2, bar.top + 2, bar.left + 2 + (bar.width() - 4) * charge.coerceIn(0f, 1f), bar.bottom - 2)
+        val barW = r * 1.7f
+        val bar = RectF(cx - barW / 2, cy + r * 0.86f, cx + barW / 2, cy + r * 1.16f)
+        c.drawRoundRect(bar, bar.height() / 2, bar.height() / 2, Theme.solid(Theme.dim(0xFF0B0E11.toInt(), ambient)))
+        val fill = RectF(bar.left + 2, bar.top + 2, bar.left + 2 + (bar.width() - 4) * charge.coerceIn(0f, 1f), bar.bottom - 2)
         c.drawRoundRect(
-            fillRect, bar.height() / 2, bar.height() / 2,
-            Theme.solid(Theme.dim(if (charge < 0.2f) Theme.DANGER else Theme.ACCENT_COOL, ambient))
+            fill, bar.height() / 2, bar.height() / 2,
+            Theme.solid(
+                Theme.dim(
+                    when {
+                        charge < 0.2f -> Theme.DANGER
+                        charging -> Theme.DC_LIVE
+                        discharging -> Theme.ACCENT
+                        else -> Theme.NICKEL
+                    }, ambient
+                )
+            )
         )
-        Theme.engrave(c, "BATTERY", cx, cy + r * 2.30f, r * 0.50f, Theme.dim(Theme.MARK_SOFT, ambient))
+        c.drawRoundRect(bar, bar.height() / 2, bar.height() / 2, Theme.line(Theme.withAlpha(Theme.NICKEL, 90), 1.4f))
     }
 
     /** The single-line symbol for a fuse. */
-    private fun fuseSymbol(c: Canvas, cx: Float, cy: Float, r: Float, blown: Boolean, live: Boolean, ambient: Float) {
-        val col = Theme.dim(if (blown) Theme.DANGER else if (live) Theme.ACCENT else Theme.STEEL, ambient)
-        val box = RectF(cx - r * 0.52f, cy - r * 0.85f, cx + r * 0.52f, cy + r * 0.85f)
-        c.drawRect(box, Theme.solid(Theme.dim(0xFF101418.toInt(), ambient)))
-        c.drawRect(box, Theme.line(col, r * 0.20f))
-        if (blown) {
-            c.drawLine(box.left, box.top, box.right, box.bottom, Theme.line(col, r * 0.20f))
-        } else {
-            c.drawLine(cx, box.top, cx, box.bottom, Theme.line(col, r * 0.18f))
-        }
-    }
-
-    /** A labelled box for apparatus off the edge of the station. */
-    private fun box(c: Canvas, r: RectF, s: String, size: Float, live: Boolean, ambient: Float) {
-        val col = Theme.dim(if (live) Theme.ACCENT else Theme.STEEL, ambient)
-        c.drawRoundRect(r, 3f, 3f, Theme.solid(Theme.dim(0xFF101418.toInt(), ambient)))
-        c.drawRoundRect(r, 3f, 3f, Theme.line(col, 2.2f))
-        c.drawText(
-            s, r.centerX(), r.centerY() + size * 0.36f,
-            Theme.label(Theme.fitSize(s, size, r.width() * 0.90f), Theme.dim(Theme.MARK_SOFT, ambient))
-        )
+    private fun fuseSymbol(c: Canvas, cx: Float, cy: Float, r: Float, blown: Boolean, color: Int, ambient: Float) {
+        val col = if (blown) Theme.dim(Theme.DANGER, ambient) else color
+        val box = RectF(cx - r * 0.60f, cy - r * 0.95f, cx + r * 0.60f, cy + r * 0.95f)
+        c.drawRect(box, Theme.solid(Theme.dim(0xFF0B0E11.toInt(), ambient)))
+        c.drawRect(box, Theme.line(col, r * 0.22f))
+        if (blown) c.drawLine(box.left, box.top, box.right, box.bottom, Theme.line(col, r * 0.22f))
+        else c.drawLine(cx, box.top, cx, box.bottom, Theme.line(col, r * 0.20f))
     }
 }

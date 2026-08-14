@@ -31,10 +31,10 @@ what keeps the engine alive.
 | Mixture | 17.5:1 lean to 9.5:1 rich, as supplied to the intake |
 | Field rheostat | Excitation: terminal volts off the bus, reactive load on it |
 
-**Switchboard (internal supplies)**: the unit breaker out to the grid, the field
-switch, and four knife switches with cartridge fuses feeding the plant itself —
-ignition (0.4 kW), cooling water pump (3.4 kW), battery charger (2.1 kW) and
-house lights (1.3 kW).
+**Switchboard (internal supplies)**: the unit breaker out to the grid, the
+emergency breaker, the field switch, and four knife switches with cartridge
+fuses feeding the plant itself — ignition (0.6 kW), cooling water pump (14 kW),
+battery charger (4.5 kW) and house lights (3 kW).
 
 **Starting gear**: relief cock, primer, and the electric starting motor, which is
 wired through the `EMG` position only.
@@ -69,21 +69,35 @@ show as a blade swung clear of its jaws.
 ```
    INTERCONNECTION
         |
-  ======+============= GRID 2300 V =========================
-        |                        |
-    MAIN TX                 STARTING TX
-        |                        |
-    UNIT BKR                     |
-        |                        |
-      [ GEN ]                    |
-        |                        |
-        +---(GEN)----------------+---(GRID)-----+------(EMG)--- BATTERY
-                                                |
-                    ===== STATION SERVICE =====
+  ======+=================== GRID 2300 V ====================
+        |                                  |
+   UNIT BREAKER                            |
+        |                                  |
+        *---- TX OUTPUT ----+              |
+        |                   |              |
+    MAIN TX          EMERGENCY BKR    STARTING TX
+        |                   |              |
+     [ GEN ]            BATTERY            |
+        |                   |              |
+      (GEN)               (EMG)          (GRID)
+        |                   |              |
+  ====================== STATION SERVICE ==================
                        |      |      |      |
                       IGN   PUMP   CHGR   LIGHT
                      0.6kW 14.0kW  4.5kW  3.0kW
 ```
+
+The mimic is coloured the way a real control room panel is: **red** for the
+high tension side, **orange** for generator voltage and the station service,
+**green** for the emergency circuit. Every switching device carries a lamp,
+green when it is made and red when it is open.
+
+**The emergency circuit** hangs off the output of the main transformer: down
+through the emergency breaker, through the battery, and into the station service
+bus. That is the road the charge takes back to the cells, so with the emergency
+breaker open the battery is islanded and will only ever run down — and with the
+machine unexcited and the unit breaker open, the transformer output is dead and
+there is nothing to charge from either.
 
 Only one of the three taps into the station service bus is made at a time, and
 the selector is what makes it. Each internal load has its own switch and fuse on

@@ -75,6 +75,12 @@ class Controls {
     var mainBreakerClosed: Boolean = false
     var fieldSwitchClosed: Boolean = true
     /**
+     * The emergency breaker, tying the battery back into the output of the main
+     * transformer. With it closed the charging set can put the cells back; with
+     * it open the battery is islanded and will only ever run down.
+     */
+    var emergencyBreakerClosed: Boolean = true
+    /**
      * The internal loads on the station service bus, in the order they sit on the
      * board: ignition, cooling water pump, battery charger, house lights. The
      * ignition and the pump are left in at handover; the charger and the lights

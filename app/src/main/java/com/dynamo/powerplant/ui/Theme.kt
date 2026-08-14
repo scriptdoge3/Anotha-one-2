@@ -55,6 +55,14 @@ object Theme {
     const val LAMP_GREEN = 0xFF86E27E.toInt()
     const val LAMP_WHITE = 0xFFFFF6E0.toInt()
 
+    // --- mimic diagram, coloured by voltage level as a real board is ---
+    const val HV_DEAD = 0xFF5C2622.toInt()
+    const val HV_LIVE = 0xFFD8493A.toInt()
+    const val AC_DEAD = 0xFF5C4019.toInt()
+    const val AC_LIVE = 0xFFE8933A.toInt()
+    const val DC_DEAD = 0xFF1F4A2B.toInt()
+    const val DC_LIVE = 0xFF52C46E.toInt()
+
     // --- bakelite handles and grips ---
     const val BAKELITE = 0xFF25201E.toInt()
     const val BAKELITE_LIT = 0xFF463C37.toInt()
@@ -297,6 +305,20 @@ object Theme {
                 c.drawLine(x0, r.centerY() + r.height() * 0.11f, x1, r.centerY() + r.height() * 0.11f, rule)
             }
         }
+    }
+
+    /**
+     * The small black nameplates that label everything on a mimic panel, with
+     * their lettering picked out in white.
+     */
+    fun miniPlate(c: Canvas, cx: Float, cy: Float, s: String, size: Float, ambient: Float) {
+        val p = label(size, MARK)
+        val w = p.measureText(s) + size * 1.10f
+        val h = size * 1.75f
+        val r = RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+        c.drawRoundRect(r, 2f, 2f, solid(dim(0xFF0B0D0F.toInt(), ambient)))
+        c.drawRoundRect(r, 2f, 2f, line(withAlpha(NICKEL, (90 * ambient).toInt()), 1.3f))
+        c.drawText(s, cx, cy + size * 0.36f, label(size, dim(MARK, ambient)))
     }
 
     /** A run of deco chevrons, for banding a header. */

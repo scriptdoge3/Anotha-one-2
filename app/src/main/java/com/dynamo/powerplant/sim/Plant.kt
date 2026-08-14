@@ -215,6 +215,7 @@ class Plant(seed: Long = System.nanoTime()) {
         engine.waterPumpRunning = service.isRunning(Service.PUMP)
         engine.chargerRunning = service.isRunning(Service.CHARGER)
         engine.serviceDrawKw = service.demandKw
+        engine.mainTransformerLive = mainTransformerLive()
 
         // ---- prime movers -------------------------------------------------------
         var torque = engine.step(dt, ctl, rpm)
@@ -297,6 +298,15 @@ class Plant(seed: Long = System.nanoTime()) {
     }
 
     /**
+     * Whether the output side of the main transformer has volts on it. The
+     * machine feeds it whenever it is excited and turning, and the grid feeds it
+     * as well once the unit breaker is closed.
+     */
+    fun mainTransformerLive(): Boolean =
+        gen.emf(rpm) > Spec.RATED_VOLTS * 0.35 ||
+            (ctl.mainBreakerClosed && grid.volts > Spec.RATED_VOLTS * 0.45)
+
+    /**
      * How brightly the panel lamps burn, which depends on whether the source the
      * selector is pointing at is actually alive.
      */
@@ -328,6 +338,7 @@ class Plant(seed: Long = System.nanoTime()) {
         ctl.compressionRelease = false; ctl.primerCharges = 0
         ctl.waterValve = 0.35; ctl.oilerRate = 0.45
         ctl.mainBreakerClosed = false; ctl.fieldSwitchClosed = true
+        ctl.emergencyBreakerClosed = true
         ctl.auxClosed[0] = true; ctl.auxClosed[1] = true
         ctl.auxClosed[2] = false; ctl.auxClosed[3] = false
     }

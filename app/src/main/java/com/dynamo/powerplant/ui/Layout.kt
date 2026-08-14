@@ -139,23 +139,28 @@ class Layout(val w: Float, val h: Float) {
         w * 0.980f, deck.bottom - deck.height() * 0.022f
     )
     val mainBreaker = RectF(
-        boardPlate.left + w * 0.022f, boardPlate.top + boardPlate.height() * 0.070f,
-        boardPlate.left + w * 0.290f, boardPlate.bottom - boardPlate.height() * 0.060f
-    )
-    val fieldSwitch = RectF(
-        mainBreaker.right + w * 0.022f, mainBreaker.top,
-        mainBreaker.right + w * 0.148f, mainBreaker.bottom
+        boardPlate.left + w * 0.020f, boardPlate.top + boardPlate.height() * 0.070f,
+        boardPlate.left + w * 0.240f, boardPlate.bottom - boardPlate.height() * 0.060f
     )
 
-    /** The four internal supply switches on the board. */
-    val auxSwitches: List<RectF> = run {
-        val left = fieldSwitch.right + w * 0.024f
-        val right = boardPlate.right - w * 0.018f
-        val each = (right - left) / 4f
-        (0 until 4).map {
-            RectF(left + each * it + each * 0.06f, mainBreaker.top, left + each * (it + 1) - each * 0.06f, mainBreaker.bottom)
+    /**
+     * The knife switches along the board: the emergency breaker, the field
+     * switch, and then the four internal supplies.
+     */
+    private val switchRow: List<RectF> = run {
+        val left = mainBreaker.right + w * 0.018f
+        val right = boardPlate.right - w * 0.014f
+        val each = (right - left) / 6f
+        (0 until 6).map {
+            RectF(left + each * it + each * 0.05f, mainBreaker.top, left + each * (it + 1) - each * 0.05f, mainBreaker.bottom)
         }
     }
+
+    val emergencyBreaker: RectF = switchRow[0]
+    val fieldSwitch: RectF = switchRow[1]
+
+    /** The four internal supply switches on the board. */
+    val auxSwitches: List<RectF> = switchRow.subList(2, 6)
 
     // ---------------------------------------------------------------- annunciator
     val alarmR = minOf(w * 0.026f, annunciator.height() * 0.30f)

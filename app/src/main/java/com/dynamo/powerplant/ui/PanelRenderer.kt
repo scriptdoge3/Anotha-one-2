@@ -453,6 +453,11 @@ class PanelRenderer(val L: Layout) {
             p.genVolts > Spec.RATED_VOLTS * 0.5
         )
         Widgets.knifeSwitch(
+            c, L.emergencyBreaker, if (p.ctl.emergencyBreakerClosed) 1f else 0f, "EMG BKR",
+            if (p.engine.batteryChargingNow) "CHARGING" else "", ambient,
+            live = p.ctl.emergencyBreakerClosed && p.mainTransformerLive()
+        )
+        Widgets.knifeSwitch(
             c, L.fieldSwitch, if (p.ctl.fieldSwitchClosed) 1f else 0f, "FIELD", "", ambient,
             live = p.gen.fieldFlux > 0.05
         )
