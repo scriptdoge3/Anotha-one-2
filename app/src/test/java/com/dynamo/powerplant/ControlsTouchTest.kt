@@ -150,27 +150,6 @@ class ControlsTouchTest {
     }
 
     @Test
-    fun theCrankTurnsTheEngineOver() {
-        val p = view.plant
-        p.ctl.compressionRelease = true
-        val r = L.crankR * 0.8f
-        send(MotionEvent.ACTION_DOWN, L.crankHandle.x + r, L.crankHandle.y)
-        // Twelve turns of the handle, with the plant running on as it would in the
-        // game loop so the torque is actually applied while the finger moves.
-        for (i in 1..432) {
-            val a = Math.toRadians(i * 10.0)
-            send(
-                MotionEvent.ACTION_MOVE,
-                L.crankHandle.x + (Math.cos(a) * r).toFloat(),
-                L.crankHandle.y + (Math.sin(a) * r).toFloat()
-            )
-            p.step(1.0 / 60.0)
-        }
-        send(MotionEvent.ACTION_UP, L.crankHandle.x + r, L.crankHandle.y)
-        assertTrue("the engine should be turning over, was ${p.rpm}", p.rpm > 60.0)
-    }
-
-    @Test
     fun switchgearRespondsToTaps() {
         val p = view.plant
         showTab(Tab.ELECTRICAL)

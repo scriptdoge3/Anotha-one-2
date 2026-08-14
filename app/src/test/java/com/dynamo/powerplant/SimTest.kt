@@ -75,15 +75,15 @@ class SimTest {
         p.ctl.waterValve = 0.30
         p.ctl.oilerRate = 0.55
         p.ctl.mixture = 0.88         // rich, the iron is stone cold
-        p.ctl.sparkLever = 0.12      // well retarded so the crank cannot kick
+        p.ctl.sparkLever = 0.30
         p.ctl.throttle = 0.35
         p.prime()
         p.ctl.compressionRelease = true
         p.ctl.ignition = IgnitionMode.EMG
         p.engine.starterEngaged = true
-        run(p, 3.5)
-        p.ctl.compressionRelease = false     // drop the release and let it fire
-        run(p, 5.0)
+        run(p, 4.0)                          // spin it up light on the starter
+        p.ctl.compressionRelease = false     // shut the relief cock and let it fire
+        run(p, 6.0)
         p.engine.starterEngaged = false
 
         run(p, 50.0) { tend(it) }
@@ -207,38 +207,36 @@ class SimTest {
     }
 
     @Test
-    fun dawdlingAcrossTheDeadPositionsKillsTheEngine() {
+    fun dawdlingAcrossTheDeadPositionKillsTheFire() {
         // Both machines start on EMG and must cross OFF to reach GEN.
         val fast = Plant(21)
         assertTrue(startEngine(fast))
         sweepKeyTo(fast, IgnitionMode.EMG, 0.2)
-        run(fast, 6.0) { trim(it) }
+        run(fast, 6.0) { tend(it) }
         assertTrue("should still be alive back on EMG", fast.running)
         sweepKeyTo(fast, IgnitionMode.GEN, 0.25)
-        run(fast, 6.0) { trim(it) }
+        run(fast, 6.0) { tend(it) }
         assertTrue("a brisk sweep to GEN should keep it running, rpm ${fast.rpm}", fast.running)
 
+        // The same machine, left sitting on the dead notch.
         val slow = Plant(21)
         assertTrue(startEngine(slow))
         sweepKeyTo(slow, IgnitionMode.EMG, 0.2)
-        run(slow, 6.0) { trim(it) }
-        slow.ctl.throttle = 0.25
-        sweepKeyTo(slow, IgnitionMode.GEN, 30.0)  // dawdling across the dead notch
+        run(slow, 6.0) { tend(it) }
+        val before = slow.rpm
+        slow.ctl.ignition = IgnitionMode.OFF
+        run(slow, 40.0)
+        assertTrue("with no ignition the fire must go out", slow.engine.firingSuccess < 0.05)
         assertTrue(
-            "dawdling must cost real speed: ${slow.rpm} against ${fast.rpm}",
-            slow.rpm < fast.rpm - 120.0
+            "and it must cost real speed: $before -> ${slow.rpm}",
+            slow.rpm < before - 120.0
         )
 
-        // Dawdle long enough and it coasts below the speed the exciter needs, so
-        // landing on GEN cannot relight it and the only way back is the battery.
-        val stalled = Plant(21)
-        assertTrue(startEngine(stalled))
-        sweepKeyTo(stalled, IgnitionMode.EMG, 0.2)
-        run(stalled, 6.0) { trim(it) }
-        stalled.ctl.throttle = 0.0
-        sweepKeyTo(stalled, IgnitionMode.GEN, 70.0)
-        run(stalled, 20.0)
-        assertTrue("the engine must be dead, rpm ${stalled.rpm}", !stalled.running)
+        // It will pick up again the moment a live position is reached, so long as
+        // there is still speed enough in the flywheel for the exciter.
+        slow.ctl.ignition = IgnitionMode.GEN
+        run(slow, 10.0) { tend(it) }
+        assertTrue("landing on GEN with speed left must relight it", slow.running)
     }
 
     // ------------------------------------------------------------------ starting
@@ -249,41 +247,6 @@ class SimTest {
         assertTrue("engine should be running after the start sequence", startEngine(p))
         assertTrue("should be turning usefully, was ${p.rpm}", p.rpm > 400.0)
     }
-
-    @Test
-    fun advancedSparkOnTheCrankKicksBack() {
-        val p = Plant(31)
-        p.ctl.mixture = 0.88
-        p.ctl.throttle = 0.3
-        p.ctl.sparkLever = 1.0          // fully advanced, the classic mistake
-        p.ctl.ignition = IgnitionMode.EMG
-        p.prime()
-        var guard = 0
-        while (!p.ended && guard++ < 4000) {
-            p.crank(1.0)
-            p.step(1.0 / 60.0)
-        }
-        assertEquals("cranking on full advance must break your wrist", Failure.KICKBACK, p.failure)
-    }
-
-    @Test
-    fun handCrankingNeedsTheCompressionRelease() {
-        val withRelease = Plant(32)
-        withRelease.ctl.compressionRelease = true
-        repeat(900) { withRelease.crank(1.0); withRelease.step(1.0 / 60.0) }
-
-        val without = Plant(32)
-        without.ctl.compressionRelease = false
-        repeat(900) { without.crank(1.0); without.step(1.0 / 60.0) }
-
-        assertTrue(
-            "the release must make the engine far easier to turn: ${without.rpm} vs ${withRelease.rpm}",
-            withRelease.rpm > without.rpm * 1.25
-        )
-        assertTrue("hand cranking should reach magneto speed", withRelease.rpm > 150.0)
-    }
-
-    // ------------------------------------------------------------------ running
 
     @Test
     fun throttleSetsFrequencyOffTheBus() {
@@ -341,10 +304,10 @@ class SimTest {
             val err = pl.grid.dispatchKw() - pl.outputKw
             pl.ctl.throttle = (pl.ctl.throttle + err * 0.0012 / 60.0 * 60.0).coerceIn(0.0, 1.0)
         }
-        assertTrue("should be exporting power, was ${p.outputKw} kW", p.outputKw > 25.0)
+        assertTrue("should be exporting power, was ${p.outputKw} kW", p.outputKw > 60.0)
         assertTrue(
             "should be near the order of ${p.grid.dispatchKw()} kW, was ${p.outputKw}",
-            abs(p.outputKw - p.grid.dispatchKw()) < 18.0
+            abs(p.outputKw - p.grid.dispatchKw()) < 70.0
         )
         assertEquals(Failure.NONE, p.failure)
     }
@@ -372,17 +335,17 @@ class SimTest {
 
         val kwBefore = p.outputKw
         p.ctl.throttle = (p.ctl.throttle + 0.18).coerceAtMost(1.0)
-        run(p, 12.0) { trim(it) }
-        assertTrue("opening the throttle must push out watts: $kwBefore -> ${p.outputKw}", p.outputKw > kwBefore + 6.0)
+        run(p, 20.0) { trim(it) }
+        assertTrue("opening the throttle must push out watts: $kwBefore -> ${p.outputKw}", p.outputKw > kwBefore + 25.0)
 
         val kwAfterThrottle = p.outputKw
         val kvarBefore = p.outputKvar
         p.ctl.excitation = (p.ctl.excitation + 0.20).coerceAtMost(1.0)
-        run(p, 12.0) { trim(it) }
-        assertTrue("more field must push out vars: $kvarBefore -> ${p.outputKvar}", p.outputKvar > kvarBefore + 8.0)
+        run(p, 30.0) { trim(it) }
+        assertTrue("more field must push out vars: $kvarBefore -> ${p.outputKvar}", p.outputKvar > kvarBefore + 25.0)
         assertTrue(
             "field should barely touch the watts: $kwAfterThrottle -> ${p.outputKw}",
-            abs(p.outputKw - kwAfterThrottle) < 22.0
+            abs(p.outputKw - kwAfterThrottle) < 60.0
         )
     }
 
@@ -433,6 +396,33 @@ class SimTest {
     // ------------------------------------------------------------------ the town
 
     @Test
+    fun theSetStartsOnTheStarterFromTheBoardAsHandedOver() {
+        // Everything left where the day man had it: selector to the battery and
+        // hold the starting motor, and nothing else.
+        val p = Plant(77)
+        p.ctl.ignition = IgnitionMode.EMG
+        p.engine.starterEngaged = true
+        // Hold the starter until it catches, then let go, as anyone would.
+        var held = 0.0
+        while (held < 25.0 && !p.running) { p.step(1.0 / 60.0); held += 1.0 / 60.0 }
+        p.engine.starterEngaged = false
+        assertTrue("the set must catch on the starter, gave up after ${held}s", p.running)
+        run(p, 8.0)
+        assertTrue("and must keep running once the starter is released, rpm ${p.rpm}", p.running)
+    }
+
+    @Test
+    fun holdingTheStarterOnTheBatteryFlattensIt() {
+        // The water pump alone is 14 kW off the cells, so emergency supply is a
+        // clock: get it lit and get across to the machine.
+        val p = Plant(78)
+        p.ctl.ignition = IgnitionMode.EMG
+        p.engine.starterEngaged = true
+        run(p, 60.0)
+        assertTrue("the cells must be well down, was ${p.engine.batteryCharge}", p.engine.batteryCharge < 0.25)
+    }
+
+    @Test
     fun theDispatcherGivesANewOrderEveryNinetySeconds() {
         val p = Plant(11)
         val first = p.grid.dispatchW
@@ -477,7 +467,7 @@ class SimTest {
         p.ctl.auxClosed[Service.LIGHTS] = true
         run(p, 2.0)
         assertTrue("the internal bus should be overloaded", p.service.overloaded)
-        assertTrue("and its volts should have sagged", p.service.volts < 0.8)
+        assertTrue("and its volts should have sagged, was ${p.service.volts}", p.service.volts < 0.90)
 
         // Shed the charger and the lights and it comes back up.
         p.ctl.auxClosed[Service.CHARGER] = false

@@ -30,9 +30,9 @@ class Service {
 
     companion object {
         /** What each source can deliver to the internal bus, in kilowatts. */
-        const val CAPACITY_GRID_KW = 26.0
-        const val CAPACITY_GEN_KW = 26.0
-        const val CAPACITY_BATTERY_KW = 5.0
+        const val CAPACITY_GRID_KW = 60.0
+        const val CAPACITY_GEN_KW = 60.0
+        const val CAPACITY_BATTERY_KW = 18.0
 
         const val IGNITION = 0
         const val PUMP = 1
@@ -41,10 +41,10 @@ class Service {
     }
 
     val loads = listOf(
-        ServiceLoad("IGNITION", "IGN", 0.35, 0.30),
-        ServiceLoad("WATER PUMP", "PUMP", 3.40, 0.55),
-        ServiceLoad("BATTERY CHARGER", "CHGR", 2.10, 0.60),
-        ServiceLoad("HOUSE LIGHTS", "LIGHT", 1.30, 0.25)
+        ServiceLoad("IGNITION", "IGN", 0.60, 0.30),
+        ServiceLoad("WATER PUMP", "PUMP", 14.00, 0.55),
+        ServiceLoad("BATTERY CHARGER", "CHGR", 4.50, 0.60),
+        ServiceLoad("HOUSE LIGHTS", "LIGHT", 3.00, 0.25)
     )
 
     /** Volts on the internal bus, per unit. */

@@ -61,11 +61,11 @@ class RenderTest {
         while (t < seconds && !p.ended) { each(p); p.step(dt); t += dt }
     }
 
-    private fun shoot(name: String, p: Plant, crank: Float = 0f, effort: Float = 0f, tab: Tab = Tab.CONTROL) {
+    private fun shoot(name: String, p: Plant, tab: Tab = Tab.CONTROL) {
         val l = Layout(Layout.VIRTUAL_W, 2340f)
         val r = PanelRenderer(l)
         val bmp = Bitmap.createBitmap(l.w.toInt(), l.h.toInt(), Bitmap.Config.ARGB_8888)
-        r.draw(Canvas(bmp), p, 1000L, crank, effort, emptySet(), tab)
+        r.draw(Canvas(bmp), p, 1000L, emptySet(), tab)
         val f = File(outDir, "$name.png")
         f.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         r.release()
@@ -94,7 +94,7 @@ class RenderTest {
         p.ctl.ignition = IgnitionMode.EMG
         p.engine.starterEngaged = true
         run(p, 2.5)
-        shoot("02-cranking", p, crank = 1.1f, effort = 0.9f)
+        shoot("02-cranking", p)
     }
 
     @Test

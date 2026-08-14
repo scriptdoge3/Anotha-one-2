@@ -32,7 +32,7 @@ class Grid(private val rnd: Random = Random(0x1920)) {
         private set
 
     /** The load order in watts, and how long until the next one. */
-    var dispatchW: Double = 45_000.0
+    var dispatchW: Double = 185_000.0
         private set
     var secondsToChange: Double = DISPATCH_PERIOD_S
         private set
@@ -56,9 +56,9 @@ class Grid(private val rnd: Random = Random(0x1920)) {
 
     /** The dispatcher's programme for the shift, in watts. */
     private val schedule = doubleArrayOf(
-        45_000.0, 62_000.0, 78_000.0, 70_000.0, 95_000.0, 108_000.0,
-        88_000.0, 116_000.0, 102_000.0, 74_000.0, 119_000.0, 96_000.0,
-        66_000.0, 48_000.0, 30_000.0
+        185_000.0, 258_000.0, 325_000.0, 290_000.0, 396_000.0, 452_000.0,
+        368_000.0, 483_000.0, 425_000.0, 310_000.0, 495_000.0, 402_000.0,
+        276_000.0, 200_000.0, 125_000.0
     )
 
     fun step(dt: Double, gen: Generator, ctl: Controls) {
@@ -98,7 +98,7 @@ class Grid(private val rnd: Random = Random(0x1920)) {
         if (ctl.mainBreakerClosed) {
             val err = abs(outW - dispatchW)
             dispatchErrorKws += err / 1000.0 * dt
-            if (err > 12_000.0) secondsOffOrder += dt
+            if (err > 45_000.0) secondsOffOrder += dt
         } else {
             dispatchErrorKws += dispatchW / 1000.0 * dt
             secondsOffOrder += dt
@@ -113,7 +113,7 @@ class Grid(private val rnd: Random = Random(0x1920)) {
     fun reset() {
         hz = 60.0
         volts = Spec.RATED_VOLTS
-        dispatchW = 45_000.0
+        dispatchW = 185_000.0
         secondsToChange = DISPATCH_PERIOD_S
         dispatchStep = 0
         dispatchChangedThisStep = false

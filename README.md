@@ -5,13 +5,13 @@ by hand. There is no governor, no voltage regulator, no automatic synchroniser
 and no tutorial. There is an engine, a switchboard, and a dispatcher who expects
 his kilowatts on time.
 
-You are the night operator at the Millbrook Light & Power Company. A
-two-cylinder horizontal gasoline engine drives a 12-pole, 2300 volt, 60 cycle
-alternator, and that set is tied into a full interconnection through a main
+You are the night operator at the Millbrook Light & Power Company. A horizontal
+gasoline engine drives a 12-pole, 2300 volt, 60 cycle alternator rated **500
+kilowatts**, and that set is tied into a full interconnection through a main
 transformer and a unit breaker.
 
-The grid is large. Your 120 kilowatts is a rounding error on it, so you do not
-set its frequency — you follow it. What you do control is how much you put onto
+The grid is large. Even 500 kilowatts is small against it, so you do not set its
+frequency — you follow it. What you do control is how much you put onto
 the bars, and the dispatcher hands you a new load order every ninety seconds.
 
 The switchboard is not for the grid. It is for the plant's own internal
@@ -36,8 +36,8 @@ switch, and four knife switches with cartridge fuses feeding the plant itself �
 ignition (0.4 kW), cooling water pump (3.4 kW), battery charger (2.1 kW) and
 house lights (1.3 kW).
 
-**Starting gear**: relief cock, primer, starting crank, and the electric starting
-motor (wired through the `EMG` position only).
+**Starting gear**: relief cock, primer, and the electric starting motor, which is
+wired through the `EMG` position only.
 
 **Auxiliaries**: cooling water gate and the mechanical lubricator.
 
@@ -48,8 +48,11 @@ the three synchronising lamps, machine and bus voltmeters, wattmeter, ammeter.
 Below it the panel switches between two decks, which is the walk an operator
 makes between the machine and the board:
 
-- **CONTROL** — engine speed, oil and jacket gauges, the five mains, the
-  starting gear, and the water and oil handwheels.
+- **CONTROL** — three panels. **ENGINE** carries the tachometer, the supply
+  selector, throttle, spark, mixture and the starting gear. **OIL AND WATER**
+  carries the oil pressure and jacket gauges with the lubricator and water gate
+  handwheels. **GENERATOR** carries the field rheostat with field and reactive
+  meters and the power factor.
 - **ELECTRICAL** — the station single line, and under it the switchboard
   carrying the unit breaker, the field switch and the four internal supplies.
 
@@ -79,6 +82,7 @@ show as a blade swung clear of its jaws.
                     ===== STATION SERVICE =====
                        |      |      |      |
                       IGN   PUMP   CHGR   LIGHT
+                     0.6kW 14.0kW  4.5kW  3.0kW
 ```
 
 Only one of the three taps into the station service bus is made at a time, and
@@ -86,9 +90,9 @@ the selector is what makes it. Each internal load has its own switch and fuse on
 the board. Watch the battery branch: it runs one way when you are drawing off
 `EMG` and the other way when the charging set is putting the cells back.
 
-**The bus has a limit.** The grid and the generator will each carry 26 kW, which
-is more than the whole board asks for. The battery will carry 5 kW, which is
-not. On emergency supply you have to decide what matters: the charger cannot put
+**The bus has a limit.** The grid and the generator will each carry 60 kW, which
+is more than the whole board asks for. The battery will carry 18 kW, which is
+not — the water pump alone is 14 kW. On emergency supply you have to decide what matters: the charger cannot put
 anything back while the battery is the thing feeding the bus, so switch it out.
 Overload the bus far enough and the volts sag until loads drop out, and then a
 fuse goes.
@@ -128,24 +132,30 @@ battery.
 
 ## Getting the engine lit, cold
 
-1. Water gate barely cracked. A cold engine wants to warm up.
-2. Lubricator feeding — about a third open to start.
-3. Mixture **rich**. On cold iron most of the gasoline condenses on the port
-   walls and never burns, so what reaches the cylinder is far leaner than what
-   you metered.
-4. Spark lever **fully retarded**. This matters: a charge firing before top dead
-   centre while you are on the crank handle will kick back and break your wrist,
-   and that ends the shift.
-5. Prime it — one or two squirts. More than three and you will flood it.
-6. Open the relief cock. You cannot hand-crank against full compression.
-7. Selector to `EMG`, then either hold the starter button or swipe round the
-   crank. (`GRID` will fire the plugs too, but only the battery turns the
-   starting motor.)
-8. Once it is spinning, shut the relief cock and let it fire.
+The day man left the board ready: a fast idle on the throttle, a rich needle, a
+retarded spark, the water gate cracked and the lubricator feeding. So the short
+version is **selector to `EMG`, hold the starter until it catches, let go.**
 
-Then bring the throttle up, lean the mixture out and advance the spark as the
-revolutions rise, and let the jacket come up to about 78 °C before you ask much
-of it. When it is running properly, sweep the selector across to `GEN`.
+The longer version, and what each of those settings is for:
+
+1. **Mixture rich.** On cold iron most of the gasoline condenses on the port
+   walls and never burns, so what reaches the cylinder is far leaner than what
+   you metered. Lean it out as the jacket warms or it will foul the plugs.
+2. **Spark retarded.** A cold engine at cranking speed wants very little lead.
+   Advance it as the revolutions rise.
+3. **A fast idle on the throttle.** A cold engine is down on power and this one
+   has a great deal of its own friction to overcome. Bring the throttle back as
+   it warms, or it will run away — there is no governor to catch it.
+4. **Prime it** if it is being stubborn: one or two squirts. More than three and
+   you will flood it and have to clear it.
+5. **The relief cock** takes the compression off so the starter spins the engine
+   up faster. Shut it again before it can fire — with the cock open no charge
+   will light at all.
+6. **Do not sit on the starter.** The cells also carry the ignition and the
+   14 kW cooling water pump, so emergency supply is a clock. Get it lit, let go,
+   and sweep the selector across to `GEN`.
+
+Then let the jacket come up to about 78 °C before you ask much of it.
 
 ## Getting on the bus
 
@@ -189,7 +199,7 @@ outside limits while you are tied on and the system protection sheds you.
 
 ## Things that will end your shift
 
-Kickback on the crank · seized main bearing · thrown connecting rod · piston
+Seized main bearing · thrown connecting rod · piston
 burned through by detonation · seizure from a boiled-dry jacket (including one
 caused by leaving the water pump switched out) · burst flywheel from throwing
 the load off at full throttle · sheared coupling from closing out of phase ·

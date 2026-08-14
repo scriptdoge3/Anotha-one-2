@@ -58,7 +58,6 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     var firedThisStep: Boolean = false
     var misfiredThisStep: Boolean = false
     var backfiredThisStep: Boolean = false
-    var kickbackThisStep: Boolean = false
 
     var running: Boolean = false
         private set
@@ -129,7 +128,7 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
      * That is why a cold engine needs the mixture rich and the primer used.
      */
     fun inCylinderAfr(suppliedAfr: Double, jacket: Double, primeActive: Boolean, flood: Double): Double {
-        val coldFactor = 0.50 * clamp((50.0 - jacket) / 42.0, 0.0, 1.0)
+        val coldFactor = 0.38 * clamp((50.0 - jacket) / 42.0, 0.0, 1.0)
         var afr = suppliedAfr * (1.0 + coldFactor)
         if (primeActive) afr *= 0.78
         afr *= (1.0 - flood * 0.42)
@@ -145,7 +144,7 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
 
     /** Combustion efficiency 0..1 for the charge actually present in the cylinder. */
     fun mixtureEfficiency(inCylAfr: Double): Double =
-        clamp(exp(-sq((inCylAfr - 12.5) / 2.80)), 0.0, 1.0)
+        clamp(exp(-sq((inCylAfr - 12.5) / 3.10)), 0.0, 1.0)
 
     fun sparkEfficiency(advanceDeg: Double, optimalDeg: Double): Double {
         val err = advanceDeg - optimalDeg
@@ -155,19 +154,11 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     /** Friction and pumping torque, N*m. Compression release removes the pumping work. */
     fun dragTorque(rpm: Double, ctl: Controls): Double {
         val comp = if (ctl.compressionRelease) 0.12 else 1.0
-        val pumping = 170.0 * comp
-        val viscous = 0.28 * rpm + 0.00045 * rpm * rpm      // bearings plus windage
-        val dryPenalty = (1.0 - oilFilm) * (170.0 + 0.55 * rpm)
+        val pumping = 560.0 * comp
+        val viscous = 1.17 * rpm + 0.00188 * rpm * rpm      // bearings plus windage
+        val dryPenalty = (1.0 - oilFilm) * (560.0 + 2.30 * rpm)
         return pumping + viscous + dryPenalty
     }
-
-    /**
-     * How much of the man on the crank handle actually reaches the flywheel.
-     * With the compression release shut he stalls against the compression stroke
-     * and gets nowhere until the flywheel already has some speed in it.
-     */
-    fun crankEffectiveness(rpm: Double, ctl: Controls): Double =
-        if (ctl.compressionRelease) 1.0 else clamp(rpm / 110.0, 0.22, 1.0)
 
     /**
      * Advance the engine one step and return net mean shaft torque in N*m
@@ -177,7 +168,6 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         firedThisStep = false
         misfiredThisStep = false
         backfiredThisStep = false
-        kickbackThisStep = false
 
         val afr = ctl.airFuelRatio()
         val advance = ctl.sparkAdvanceDeg()
@@ -185,7 +175,7 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
 
         // ---- charge preparation -------------------------------------------------
         // Idle bleed means the throttle is never fully shut off.
-        val airflow = 0.055 + 0.945 * Math.pow(clamp(ctl.throttle, 0.0, 1.0), 1.25)
+        val airflow = 0.085 + 0.915 * Math.pow(clamp(ctl.throttle, 0.0, 1.0), 1.25)
         val primeActive = ctl.primerCharges > 0
         val effectiveAfr = inCylinderAfr(afr, jacketTempC, primeActive, floodLevel)
 
@@ -193,7 +183,7 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         val sparkEff = sparkEfficiency(advance, optimalAdvanceDeg(rpm, effectiveAfr))
         // Cold iron soaks up heat that should have gone into the piston, so an
         // engine run with the water gate wide open is down on power all night.
-        val coldEff = clamp(0.70 + jacketTempC / 250.0, 0.0, 1.0)
+        val coldEff = clamp(0.86 + jacketTempC / 450.0, 0.0, 1.0)
 
         // ---- will the charge actually light? -----------------------------------
         val lightable = energy > 0.16 && mixEff > 0.12 && !ctl.compressionRelease && floodLevel < 0.85
@@ -228,16 +218,6 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         // A boiling jacket loses charge density and starts to lose power.
         if (jacketTempC > 100.0) torque *= clamp(1.0 - (jacketTempC - 100.0) / 55.0, 0.25, 1.0)
 
-        // ---- kickback -----------------------------------------------------------
-        // Firing well before top dead centre at cranking speed drives the crank backwards.
-        if (firedThisStep && rpm < 165.0 && advance > 14.0 && !ctl.compressionRelease) {
-            val severity = clamp((advance - 14.0) / 24.0, 0.0, 1.0) * clamp(1.0 - rpm / 165.0, 0.0, 1.0)
-            if (severity > 0.18) {
-                kickbackThisStep = true
-                torque = -Spec.PEAK_TORQUE * 0.85 * severity
-            }
-        }
-
         // ---- starting motor -----------------------------------------------------
         // Wired through the emergency battery only, so EMG is the one position
         // that will turn the engine over.
@@ -248,10 +228,10 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         if (starterCranking) {
             val avail = clamp(batteryCharge * (1.0 - starterHeat * 0.75), 0.0, 1.0)
             torque += Spec.STARTER_TORQUE * avail * clamp(1.0 - rpm / Spec.STARTER_STALL_RPM, 0.0, 1.0)
-            batteryCharge = max(0.0, batteryCharge - dt * 0.032)
-            starterHeat = min(1.0, starterHeat + dt * 0.075)
+            batteryCharge = max(0.0, batteryCharge - dt * 0.022)
+            starterHeat = min(1.0, starterHeat + dt * 0.030)
         } else {
-            starterHeat = max(0.0, starterHeat - dt * 0.045)
+            starterHeat = max(0.0, starterHeat - dt * 0.055)
         }
 
         // ---- battery housekeeping ----------------------------------------------
@@ -259,7 +239,7 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         // from the bus or from the machine itself.
         if (ctl.ignition == IgnitionMode.EMG) {
             // Everything switched onto the bus is coming out of the cells.
-            batteryCharge = max(0.0, batteryCharge - dt * 0.0022 * (1.0 + serviceDrawKw * 0.55))
+            batteryCharge = max(0.0, batteryCharge - dt * 0.0016 * (1.0 + serviceDrawKw * 0.28))
         }
         // The charging set is a switched load on the internal bus, and it cannot
         // put anything back while the bus is being fed by the battery itself.

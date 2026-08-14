@@ -10,7 +10,6 @@ import kotlin.random.Random
 
 enum class Failure(val headline: String, val detail: String) {
     NONE("", ""),
-    KICKBACK("THE CRANK KICKED", "The charge fired ahead of top dead centre while you were on the handle. Broken wrist. The shift is over."),
     BEARING_SEIZED("MAIN BEARING SEIZED", "The lubricator was not keeping up. The white metal ran and the shaft picked up."),
     THROWN_ROD("CONNECTING ROD THROWN", "The bottom end let go and came out through the crankcase."),
     PISTON_HOLED("PISTON BURNED THROUGH", "Detonation, hour after hour, until the crown gave way."),
@@ -27,7 +26,6 @@ class PlantEvents {
     var fired = false
     var misfired = false
     var backfired = false
-    var kickback = false
     var breakerClosed = false
     var breakerOpened = false
     var roughClose = false
@@ -38,7 +36,7 @@ class PlantEvents {
     var poleSlip = false
 
     fun clear() {
-        fired = false; misfired = false; backfired = false; kickback = false
+        fired = false; misfired = false; backfired = false
         breakerClosed = false; breakerOpened = false; roughClose = false; severeClose = false
         knifeSwitch = false; fuseBlew = false; demandChanged = false; poleSlip = false
     }
@@ -64,9 +62,6 @@ class Plant(seed: Long = System.nanoTime()) {
 
     /** Phase of the machine relative to the bus, radians, wrapped to -PI..PI. */
     var syncPhase: Double = 0.0
-        private set
-
-    var crankTorque: Double = 0.0
         private set
 
     var couplingDamage: Double = 0.0
@@ -107,12 +102,6 @@ class Plant(seed: Long = System.nanoTime()) {
         // Voltage across the lamp is the vector difference of the two systems.
         val diff = Math.sqrt(vg * vg + vb * vb - 2 * vg * vb * Math.cos(syncPhase))
         return clamp(diff / (Spec.RATED_VOLTS * 1.35), 0.0, 1.0)
-    }
-
-    /** One swipe of the starting crank. */
-    fun crank(strength: Double) {
-        if (ended) return
-        if (rpm < 340.0) crankTorque = max(crankTorque, Spec.CRANK_TORQUE * clamp(strength, 0.0, 1.0))
     }
 
     fun prime() {
@@ -233,16 +222,6 @@ class Plant(seed: Long = System.nanoTime()) {
         if (engine.misfiredThisStep) events.misfired = true
         if (engine.backfiredThisStep) events.backfired = true
 
-        if (crankTorque > 1.0) {
-            if (rpm < 340.0) torque += crankTorque * engine.crankEffectiveness(rpm, ctl)
-            crankTorque *= Math.exp(-dt / 0.35)
-            if (engine.kickbackThisStep) {
-                events.kickback = true
-                fail(Failure.KICKBACK)
-                return
-            }
-        }
-
         // ---- electrical ---------------------------------------------------------
         gen.stepField(dt, ctl, rpm)
         val elecTorque = gen.stepElectrical(dt, ctl, rpm, grid)
@@ -339,15 +318,15 @@ class Plant(seed: Long = System.nanoTime()) {
     }
 
     fun reset() {
-        rpm = 0.0; syncPhase = 0.0; crankTorque = 0.0; couplingDamage = 0.0
+        rpm = 0.0; syncPhase = 0.0; couplingDamage = 0.0
         failure = Failure.NONE; shiftSeconds = 0.0; peakOutputKw = 0.0; overspeedSeconds = 0.0
         wasBreakerClosed = false; previousDemandStep = 0
         engine.reset(); gen.reset(); grid.reset(); service.reset()
         gridTripSeconds = 0.0
         ctl.ignition = IgnitionMode.OFF
-        ctl.throttle = 0.0; ctl.sparkLever = 0.5; ctl.mixture = 0.5; ctl.excitation = 0.0
+        ctl.throttle = 0.45; ctl.sparkLever = 0.30; ctl.mixture = 0.80; ctl.excitation = 0.0
         ctl.compressionRelease = false; ctl.primerCharges = 0
-        ctl.waterValve = 0.0; ctl.oilerRate = 0.0
+        ctl.waterValve = 0.35; ctl.oilerRate = 0.45
         ctl.mainBreakerClosed = false; ctl.fieldSwitchClosed = true
         ctl.auxClosed[0] = true; ctl.auxClosed[1] = true
         ctl.auxClosed[2] = false; ctl.auxClosed[3] = false

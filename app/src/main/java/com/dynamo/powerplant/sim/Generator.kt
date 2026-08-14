@@ -21,7 +21,7 @@ class Generator {
          * about 40 percent damping on the natural swing of this machine so it
          * pulls into step instead of hunting all night.
          */
-        const val DAMPING_W_PER_RAD = 57_000.0
+        const val DAMPING_W_PER_RAD = 239_000.0
     }
 
     /** Rotor angle relative to the bus reference, radians. Only meaningful when tied on. */

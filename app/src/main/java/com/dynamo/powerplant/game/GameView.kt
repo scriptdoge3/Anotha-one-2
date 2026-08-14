@@ -36,13 +36,6 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
     private var offX = 0f
     private var offY = 0f
 
-    // crank animation and gesture
-    private var crankAngle = 0f
-    private var crankEffort = 0f
-    private var crankLastAngle = 0f
-    private var crankAccum = 0f
-    private var crankLastTrigger = 0L
-
     /** Which deck is showing. The instrument board above it is always in view. */
     var tab: Tab = Tab.CONTROL
         private set
@@ -101,7 +94,6 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
             if (dt > 0.20) dt = 0.20
 
             plant.step(dt)
-            stepCrankVisual(dt)
             audio.update(plant, dt)
 
             val h = holder
@@ -114,7 +106,7 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
                         c.save()
                         c.translate(offX, offY)
                         c.scale(scale, scale)
-                        renderer?.draw(c, plant, System.currentTimeMillis(), crankAngle, crankEffort, pressed, tab)
+                        renderer?.draw(c, plant, System.currentTimeMillis(), pressed, tab)
                         c.restore()
                     }
                 } finally {
@@ -128,13 +120,6 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
                 try { Thread.sleep(wait) } catch (e: InterruptedException) { return }
             }
         }
-    }
-
-    /** The crank spins with the engine, and faster while you are working it. */
-    private fun stepCrankVisual(dt: Double) {
-        val rev = plant.rpm / 60.0
-        crankAngle = ((crankAngle + (rev * dt * 2.0 * Math.PI).toFloat()) % (2f * Math.PI.toFloat()))
-        crankEffort = (crankEffort - dt.toFloat() * 2.2f).coerceAtLeast(0f)
     }
 
     // ------------------------------------------------------------------ input
@@ -199,14 +184,6 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
         if (l.waterWheel.near(x, y, l.waterWheelR * 1.5f)) { grabs[id] = Grab("water", x, y, p.ctl.waterValve); return }
         if (l.oilerWheel.near(x, y, l.oilerWheelR * 1.5f)) { grabs[id] = Grab("oiler", x, y, p.ctl.oilerRate); return }
         if (l.keySwitch.near(x, y, l.keySwitchR * 1.45f)) { grabs[id] = Grab("key", x, y, 0.0); return }
-        if (l.crankHandle.near(x, y, l.crankR * 1.6f)) {
-            crankLastAngle = atan2(y - l.crankHandle.y, x - l.crankHandle.x)
-            crankAccum = 0f
-            crankLastTrigger = 0L
-            grabs[id] = Grab("crank", x, y, 0.0)
-            return
-        }
-
         // --- momentary and latching switches ---
         if (l.starterButton.near(x, y, l.starterR * 1.6f)) {
             p.engine.starterEngaged = true
@@ -245,7 +222,6 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
             "water" -> p.ctl.waterValve = wheelValue(g, y, l.waterWheelR)
             "oiler" -> p.ctl.oilerRate = wheelValue(g, y, l.oilerWheelR)
             "key" -> moveKey(l, x, y)
-            "crank" -> turnCrank(l, x, y)
         }
     }
 
@@ -298,28 +274,4 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
         audio.tick()
     }
 
-    /** Swiping round the crank turns the engine over; how hard depends on how fast. */
-    private fun turnCrank(l: Layout, x: Float, y: Float) {
-        val a = atan2(y - l.crankHandle.y, x - l.crankHandle.x)
-        var d = a - crankLastAngle
-        while (d > Math.PI) d -= (2 * Math.PI).toFloat()
-        while (d < -Math.PI) d += (2 * Math.PI).toFloat()
-        crankLastAngle = a
-        // Only turning it the right way does any good.
-        if (d > 0) {
-            crankAccum += d
-            if (crankAccum > 0.45f) {
-                // How hard you are cranking is how fast you are turning the handle,
-                // not how far you have turned it.
-                val now = System.nanoTime()
-                val elapsed = if (crankLastTrigger == 0L) 0.25
-                else ((now - crankLastTrigger) / 1e9).coerceIn(0.02, 1.0)
-                crankLastTrigger = now
-                val radPerSec = crankAccum / elapsed
-                plant.crank((radPerSec / 7.0).coerceIn(0.30, 1.0))
-                crankEffort = 1f
-                crankAccum = 0f
-            }
-        }
-    }
 }

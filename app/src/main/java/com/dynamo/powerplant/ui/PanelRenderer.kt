@@ -34,22 +34,22 @@ class PanelRenderer(val L: Layout) {
     )
     val wattDial = Dial(
         L.wattmeter.x, L.wattmeter.y, L.smallR, "OUTPUT", "KILOWATTS",
-        -40.0, 160.0, 5, 4, listOf(Band(-40.0, 0.0), Band(132.0, 160.0))
+        -200.0, 600.0, 4, 5, listOf(Band(-200.0, 0.0), Band(550.0, 600.0))
     )
     val ampDial = Dial(
         L.ammeter.x, L.ammeter.y, L.smallR, "LINE", "AMPERES",
-        0.0, 60.0, 3, 5, listOf(Band(45.0, 60.0))
+        0.0, 250.0, 5, 5, listOf(Band(200.0, 250.0))
     )
     val tachDial = Dial(
         L.tachometer.x, L.tachometer.y, L.engR, "SPEED", "REV. PER MIN.",
         0.0, 900.0, 3, 5, listOf(Band(Spec.OVERSPEED_RPM, 900.0))
     )
     val oilDial = Dial(
-        L.oilGauge.x, L.oilGauge.y, L.engR, "OIL", "LBS. SQ. IN.",
+        L.oilGauge.x, L.oilGauge.y, L.auxGaugeR, "OIL", "LBS. SQ. IN.",
         0.0, 40.0, 4, 5, listOf(Band(0.0, 8.0))
     )
     val tempDial = Dial(
-        L.tempGauge.x, L.tempGauge.y, L.engR, "JACKET", "DEG. CENT.",
+        L.tempGauge.x, L.tempGauge.y, L.auxGaugeR, "JACKET", "DEG. CENT.",
         0.0, 150.0, 5, 5, listOf(Band(105.0, 150.0))
     )
 
@@ -152,16 +152,46 @@ class PanelRenderer(val L: Layout) {
     }
 
     private fun drawControlDeckStatic(c: Canvas, ambient: Float) {
-        val r = RectF(L.w * 0.012f, L.deck.top + 4f, L.w * 0.988f, L.deck.bottom - 4f)
-        Theme.panelPlate(c, r, 8f, 0.7f)
-        Theme.screw(c, r.left + 18f, r.top + 18f, 7f, 40f)
-        Theme.screw(c, r.right - 18f, r.top + 18f, 7f, 96f)
-        Theme.screw(c, r.left + 18f, r.bottom - 18f, 7f, 14f)
-        Theme.screw(c, r.right - 18f, r.bottom - 18f, 7f, 74f)
+        c.drawRect(L.deck, Theme.solid(Theme.dim(Theme.PANEL_DARK, ambient)))
+        subPanel(c, L.enginePanel, "ENGINE", ambient)
+        subPanel(c, L.oilWaterPanel, "OIL AND WATER", ambient)
+        subPanel(c, L.generatorPanel, "GENERATOR", ambient)
 
         tachDial.drawFace(c, ambient)
         oilDial.drawFace(c, ambient)
         tempDial.drawFace(c, ambient)
+    }
+
+    /** One bordered section of the control board, with its name across the top. */
+    private fun subPanel(c: Canvas, r: RectF, title: String, ambient: Float) {
+        Theme.panelPlate(c, r, 7f, 0.7f, pinstripe = false)
+        val hh = L.panelHeader(r)
+        val head = RectF(r.left + 3f, r.top + 3f, r.right - 3f, r.top + hh)
+        Theme.fill.alpha = 255
+        Theme.fill.shader = LinearGradient(
+            0f, head.top, 0f, head.bottom,
+            intArrayOf(Theme.dim(Theme.PANEL_LIT, ambient), Theme.dim(Theme.PANEL, ambient)),
+            null, Shader.TileMode.CLAMP
+        )
+        c.drawRect(head, Theme.fill)
+        Theme.fill.shader = null
+        c.drawLine(head.left, head.bottom, head.right, head.bottom,
+            Theme.line(Theme.dim(Theme.NICKEL_DARK, ambient), 2f))
+        Theme.engrave(
+            c, title, r.left + r.width() * 0.035f, head.centerY() + hh * 0.30f,
+            hh * 0.62f, Theme.dim(Theme.NICKEL_LIT, ambient), Paint.Align.LEFT
+        )
+        // a deco rule running out from the title to the right edge
+        val tw = Theme.label(hh * 0.62f, Theme.MARK).measureText(title)
+        val x0 = r.left + r.width() * 0.035f + tw + hh * 0.55f
+        if (x0 < head.right - 20f) {
+            c.drawLine(x0, head.centerY() - hh * 0.10f, head.right - 14f, head.centerY() - hh * 0.10f,
+                Theme.line(Theme.withAlpha(Theme.NICKEL, (60 * ambient).toInt()), 2f))
+            c.drawLine(x0, head.centerY() + hh * 0.10f, head.right - 14f, head.centerY() + hh * 0.10f,
+                Theme.line(Theme.withAlpha(Theme.NICKEL, (60 * ambient).toInt()), 2f))
+        }
+        Theme.screw(c, r.right - 14f, r.bottom - 14f, 6f, 40f)
+        Theme.screw(c, r.left + 14f, r.bottom - 14f, 6f, 100f)
     }
 
     private fun drawElectricalDeckStatic(c: Canvas, ambient: Float) {
@@ -207,8 +237,7 @@ class PanelRenderer(val L: Layout) {
     }
 
     fun draw(
-        c: Canvas, p: Plant, now: Long, crankAngle: Float, crankEffort: Float,
-        pressed: Set<String>, tab: Tab = Tab.CONTROL
+        c: Canvas, p: Plant, now: Long, pressed: Set<String>, tab: Tab = Tab.CONTROL
     ) {
         val ambient = ambientFor(p)
         // Rebuild the cached steelwork only when the light or the deck changes.
@@ -223,7 +252,7 @@ class PanelRenderer(val L: Layout) {
         drawHeaderLive(c, p, ambient)
         drawGaugesLive(c, p, ambient, now)
         if (tab == Tab.CONTROL) {
-            drawControlLive(c, p, ambient, crankAngle, crankEffort, pressed)
+            drawControlLive(c, p, ambient, pressed)
         } else {
             Mimic.draw(c, L.mimic, p, ambient, (now % 100000L) / 1000f)
             drawSwitchboardLive(c, p, ambient)
@@ -290,12 +319,20 @@ class PanelRenderer(val L: Layout) {
             c, p.clockText(), right, h.centerY() - h.height() * 0.10f,
             h.height() * 0.30f, Theme.dim(Theme.NICKEL_LIT, ambient), Paint.Align.RIGHT
         )
-        val kw = p.grid.dispatchKw()
+        val order = p.grid.dispatchKw()
         val secs = p.grid.secondsToChange
+        val onBars = if (p.ctl.mainBreakerClosed) p.outputKw else 0.0
+        val onOrder = p.ctl.mainBreakerClosed && abs(onBars - order) < 45.0
         Theme.engrave(
-            c, "TOWN LOAD %.0f KW   NEXT IN %02d".format(kw, secs.toInt()), right,
-            h.centerY() + h.height() * 0.30f, h.height() * 0.235f,
-            Theme.dim(if (secs < 8.0) Theme.LAMP_AMBER else Theme.NICKEL, ambient), Paint.Align.RIGHT
+            c, "ORDER %.0f   ON BARS %.0f KW   NEXT %02d".format(order, onBars, secs.toInt()), right,
+            h.centerY() + h.height() * 0.31f, h.height() * 0.205f,
+            Theme.dim(
+                when {
+                    secs < 8.0 -> Theme.LAMP_AMBER
+                    onOrder -> Theme.ACCENT_COOL
+                    else -> Theme.MARK_SOFT
+                }, ambient
+            ), Paint.Align.RIGHT
         )
     }
 
@@ -325,14 +362,11 @@ class PanelRenderer(val L: Layout) {
     }
 
     private fun drawControlLive(
-        c: Canvas, p: Plant, ambient: Float, crankAngle: Float, crankEffort: Float, pressed: Set<String>
+        c: Canvas, p: Plant, ambient: Float, pressed: Set<String>
     ) {
+        // ---- ENGINE ----------------------------------------------------------
         tachDial.drawNeedle(c, p.rpm, ambient)
         Theme.dialGlass(c, L.tachometer.x, L.tachometer.y, L.engR)
-        oilDial.drawNeedle(c, p.engine.oilPressureKpa * 0.145, ambient)   // kPa shown as lbs/sq in
-        Theme.dialGlass(c, L.oilGauge.x, L.oilGauge.y, L.engR)
-        tempDial.drawNeedle(c, p.engine.jacketTempC, ambient)
-        Theme.dialGlass(c, L.tempGauge.x, L.tempGauge.y, L.engR)
 
         val labels = IgnitionMode.entries.map { it.label }
         val live = IgnitionMode.entries.withIndex().filter { it.value.ignites }.map { it.index }.toSet()
@@ -340,7 +374,6 @@ class PanelRenderer(val L: Layout) {
             c, L.keySwitch.x, L.keySwitch.y, L.keySwitchR, labels,
             p.ctl.ignition.ordinal, live, ambient
         )
-
         Widgets.quadrantLever(
             c, L.throttleLever, p.ctl.throttle.toFloat(), "THROTTLE", "OPEN", "SHUT", ambient, Theme.ACCENT
         )
@@ -350,31 +383,17 @@ class PanelRenderer(val L: Layout) {
         Widgets.handwheel(
             c, L.mixtureKnob.x, L.mixtureKnob.y, L.mixtureKnobR, p.ctl.mixture.toFloat(), "MIXTURE", ambient
         )
-        Widgets.handwheel(
-            c, L.excitationKnob.x, L.excitationKnob.y, L.excitationKnobR, p.ctl.excitation.toFloat(),
-            "FIELD RHEO.", ambient, Theme.ACCENT_COOL
-        )
 
         Widgets.toggleLever(
             c, L.compRelease, if (p.ctl.compressionRelease) 1f else 0f, "RELIEF COCK", "OPEN", "SHUT", ambient
         )
         Widgets.pushButton(
-            c, L.primerButton.x, L.primerButton.y, L.primerR, "primer" in pressed,
-            "PRIMER", ambient
+            c, L.primerButton.x, L.primerButton.y, L.primerR, "primer" in pressed, "PRIMER", ambient
         )
-        Widgets.crank(c, L.crankHandle.x, L.crankHandle.y, L.crankR, crankAngle, crankEffort, ambient)
         Widgets.pushButton(
             c, L.starterButton.x, L.starterButton.y, L.starterR, p.engine.starterEngaged,
-            "STARTER", ambient, if (p.engine.starterCranking) Theme.LAMP_AMBER else Theme.NICKEL
+            "STARTER", ambient, if (p.engine.starterCranking) Theme.ACCENT else Theme.NICKEL
         )
-        Widgets.handwheel(
-            c, L.waterWheel.x, L.waterWheel.y, L.waterWheelR, p.ctl.waterValve.toFloat(), "WATER", ambient
-        )
-        Widgets.handwheel(
-            c, L.oilerWheel.x, L.oilerWheel.y, L.oilerWheelR, p.ctl.oilerRate.toFloat(), "OILER", ambient
-        )
-
-        // how many charges of raw gasoline are still in the intake
         if (p.ctl.primerCharges > 0) {
             val n = p.ctl.primerCharges
             val gap = L.primerR * 0.34f
@@ -382,10 +401,50 @@ class PanelRenderer(val L: Layout) {
                 c.drawCircle(
                     L.primerButton.x + (i - (n - 1) / 2f) * gap,
                     L.primerButton.y - L.primerR * 1.62f, L.primerR * 0.115f,
-                    Theme.solid(Theme.dim(Theme.LAMP_AMBER, ambient))
+                    Theme.solid(Theme.dim(Theme.ACCENT, ambient))
                 )
             }
         }
+
+        // ---- OIL AND WATER ---------------------------------------------------
+        oilDial.drawNeedle(c, p.engine.oilPressureKpa * 0.145, ambient)
+        Theme.dialGlass(c, L.oilGauge.x, L.oilGauge.y, L.auxGaugeR)
+        tempDial.drawNeedle(c, p.engine.jacketTempC, ambient)
+        Theme.dialGlass(c, L.tempGauge.x, L.tempGauge.y, L.auxGaugeR)
+        Widgets.handwheel(
+            c, L.oilerWheel.x, L.oilerWheel.y, L.oilerWheelR, p.ctl.oilerRate.toFloat(), "OILER", ambient
+        )
+        // The gate is only worth anything while the pump is actually turning.
+        val pumpOn = p.engine.waterPumpRunning
+        Widgets.handwheel(
+            c, L.waterWheel.x, L.waterWheel.y, L.waterWheelR, p.ctl.waterValve.toFloat(),
+            if (pumpOn) "WATER GATE" else "PUMP OUT", ambient,
+            if (pumpOn) Theme.NICKEL else Theme.DANGER,
+            if (pumpOn) Theme.ACCENT else Theme.DANGER
+        )
+
+        // ---- GENERATOR -------------------------------------------------------
+        Widgets.handwheel(
+            c, L.excitationKnob.x, L.excitationKnob.y, L.excitationKnobR,
+            p.ctl.excitation.toFloat(), "FIELD RHEO.", ambient, Theme.ACCENT_COOL, Theme.ACCENT_COOL
+        )
+        Widgets.barMeter(
+            c, L.fieldMeter, p.gen.fieldFlux.toFloat(), "FIELD", ambient, warnBelow = 0.05f
+        )
+        val varPu = ((p.outputKvar / 400.0) * 0.5 + 0.5).toFloat().coerceIn(0f, 1f)
+        Widgets.barMeter(c, L.varMeter, varPu, "REACTIVE  LAG / LEAD", ambient, warnBelow = -1f)
+        val pf = run {
+            val s2 = Math.hypot(p.outputKw, p.outputKvar)
+            if (s2 < 1.0) 1.0 else abs(p.outputKw) / s2
+        }
+        Theme.engrave(
+            c, "POWER FACTOR", L.powerFactorAt.x, L.powerFactorAt.y - L.generatorPanel.height() * 0.115f,
+            L.generatorPanel.height() * 0.090f, Theme.dim(Theme.MARK_SOFT, ambient)
+        )
+        Theme.engrave(
+            c, "%.2f".format(pf), L.powerFactorAt.x, L.powerFactorAt.y + L.generatorPanel.height() * 0.075f,
+            L.generatorPanel.height() * 0.185f, Theme.dim(Theme.MARK, ambient)
+        )
     }
 
     private fun drawSwitchboardLive(c: Canvas, p: Plant, ambient: Float) {

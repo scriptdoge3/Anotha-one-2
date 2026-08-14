@@ -83,7 +83,7 @@ object Widgets {
      */
     fun handwheel(
         c: Canvas, cx: Float, cy: Float, r: Float, value: Float, title: String, ambient: Float,
-        rimColor: Int = Theme.NICKEL
+        rimColor: Int = Theme.NICKEL, arcColor: Int = Theme.ACCENT
     ) {
         val turn = value * 3.0f * Math.PI.toFloat() * 2f * 0.28f
         // shadow under the wheel
@@ -106,7 +106,7 @@ object Widgets {
         // a little quadrant scale so you can see how far it is open
         val arc = RectF(cx - r * 1.26f, cy - r * 1.26f, cx + r * 1.26f, cy + r * 1.26f)
         c.drawArc(arc, 130f, 280f, false, Theme.line(Theme.dim(Theme.STEEL_DARK, ambient), r * 0.09f))
-        c.drawArc(arc, 130f, 280f * value, false, Theme.line(Theme.dim(rimColor, ambient), r * 0.09f))
+        c.drawArc(arc, 130f, 280f * value, false, Theme.line(Theme.dim(arcColor, ambient), r * 0.09f))
         Theme.engrave(c, title, cx, cy + r * 1.42f, r * 0.30f, Theme.dim(Theme.NICKEL_LIT, ambient))
     }
 
@@ -398,44 +398,6 @@ object Widgets {
             c, onMark, r.right - r.width() * 0.23f, markY, markSize,
             Theme.dim(if (on > 0.5f) Theme.ACCENT else Theme.MARK_SOFT, ambient)
         )
-    }
-
-    /**
-     * The starting crank: a brass handle on the end of the shaft, drawn spinning
-     * with the engine. You swipe round it to turn the engine over.
-     */
-    fun crank(c: Canvas, cx: Float, cy: Float, r: Float, angleRad: Float, effort: Float, ambient: Float) {
-        c.drawCircle(cx, cy, r * 1.24f, Theme.solid(Theme.dim(0xFF1A1E22.toInt(), ambient)))
-        c.drawCircle(cx, cy, r * 1.24f, Theme.line(Theme.dim(Theme.NICKEL, ambient), r * 0.085f))
-        // ratchet teeth around the boss
-        for (i in 0 until 16) {
-            val a = angleRad + i * (2f * Math.PI.toFloat() / 16f)
-            c.drawLine(
-                cx + (cos(a) * r * 0.30f), cy + (sin(a) * r * 0.30f),
-                cx + (cos(a) * r * 0.44f), cy + (sin(a) * r * 0.44f),
-                Theme.line(Theme.dim(Theme.STEEL_DARK, ambient), r * 0.06f)
-            )
-        }
-        val ca = cos(angleRad)
-        val sa = sin(angleRad)
-        // the throw of the crank
-        c.drawLine(cx, cy, cx + ca * r * 0.80f, cy + sa * r * 0.80f,
-            Theme.line(0x66000000, r * 0.26f))
-        c.drawLine(cx, cy, cx + ca * r * 0.80f, cy + sa * r * 0.80f,
-            Theme.line(Theme.dim(Theme.STEEL, ambient), r * 0.19f))
-        // the grip
-        val gx = cx + ca * r * 0.80f
-        val gy = cy + sa * r * 0.80f
-        c.drawCircle(gx, gy, r * 0.30f, Theme.solid(Theme.dim(Theme.BAKELITE, ambient)))
-        c.drawCircle(gx, gy, r * 0.30f, Theme.line(0x77000000, 2f))
-        c.drawCircle(gx - r * 0.09f, gy - r * 0.09f, r * 0.09f,
-            Theme.solid(Theme.withAlpha(Theme.BAKELITE_LIT, (180 * ambient).toInt())))
-        c.drawCircle(cx, cy, r * 0.24f, Theme.solid(Theme.dim(Theme.NICKEL, ambient)))
-        c.drawCircle(cx, cy, r * 0.13f, Theme.solid(Theme.dim(Theme.STEEL_DARK, ambient)))
-        if (effort > 0.02f) {
-            c.drawCircle(cx, cy, r * 1.24f, Theme.line(Theme.withAlpha(Theme.LAMP_AMBER, (150 * effort).toInt()), 4f))
-        }
-        Theme.engrave(c, "CRANK", cx, cy + r * 1.52f, r * 0.30f, Theme.dim(Theme.NICKEL_LIT, ambient))
     }
 
     /** A horizontal bar meter for the things that had no dial: sump, battery. */

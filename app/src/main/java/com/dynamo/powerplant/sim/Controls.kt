@@ -44,12 +44,19 @@ enum class IgnitionMode(
 class Controls {
     // --- the five mains ---
     var ignition: IgnitionMode = IgnitionMode.OFF
-    /** 0..1 throttle. There is no governor; this is the only speed control. */
-    var throttle: Double = 0.0
+    /**
+     * 0..1 throttle. There is no governor; this is the only speed control.
+     *
+     * The five mains are left where the day man had them when he shut down: a
+     * fast idle, a rich needle and a retarded spark, which is how you leave a
+     * cold engine that somebody else has to start. Bring the throttle back as
+     * the jacket warms or it will run away.
+     */
+    var throttle: Double = 0.45
     /** 0..1 spark lever, maps to -5 deg (retard) .. +38 deg BTDC (advance). */
-    var sparkLever: Double = 0.5
+    var sparkLever: Double = 0.30
     /** 0..1 mixture needle, 0 = lean (17.5:1), 1 = rich (9.5:1) as supplied. */
-    var mixture: Double = 0.5
+    var mixture: Double = 0.80
     /** 0..1 field rheostat on the exciter. */
     var excitation: Double = 0.0
 
@@ -59,9 +66,9 @@ class Controls {
 
     // --- auxiliaries ---
     /** 0..1 cooling water gate valve. */
-    var waterValve: Double = 0.0
+    var waterValve: Double = 0.35
     /** 0..1 mechanical lubricator drip rate. */
-    var oilerRate: Double = 0.0
+    var oilerRate: Double = 0.45
 
     // --- switchboard: the plant's own internal supplies ---
     /** The unit breaker, between the main transformer and the grid. */

@@ -59,40 +59,73 @@ class Layout(val w: Float, val h: Float) {
     val ammeter = Pt(w * 0.848f, smallY)
 
     // ---------------------------------------------------------------- control deck
+    // Three bordered panels, stacked, each with its own engraved header.
     private val cd = deck
-    val engR = minOf(w * 0.098f, cd.height() * 0.125f)
-    private val engGaugeY = cd.top + cd.height() * 0.028f + engR
-    val tachometer = Pt(w * 0.170f, engGaugeY)
-    val oilGauge = Pt(w * 0.500f, engGaugeY)
-    val tempGauge = Pt(w * 0.830f, engGaugeY)
+    private val panelGap = cd.height() * 0.016f
+    private val panelsTop = cd.top + cd.height() * 0.020f
+    private val panelsH = cd.height() - cd.height() * 0.040f - panelGap * 2f
 
-    private val ctlTop = engGaugeY + engR * 1.15f + cd.height() * 0.030f
-    private val ctlH = cd.height() * 0.415f
+    val enginePanel = RectF(w * 0.018f, panelsTop, w * 0.982f, panelsTop + panelsH * 0.500f)
+    val oilWaterPanel = RectF(
+        w * 0.018f, enginePanel.bottom + panelGap,
+        w * 0.982f, enginePanel.bottom + panelGap + panelsH * 0.255f
+    )
+    val generatorPanel = RectF(
+        w * 0.018f, oilWaterPanel.bottom + panelGap,
+        w * 0.982f, oilWaterPanel.bottom + panelGap + panelsH * 0.245f
+    )
 
-    /** The five mains, side by side, in the order you use them. */
-    val keySwitchR = minOf(w * 0.100f, ctlH * 0.42f)
-    val keySwitch = Pt(w * 0.150f, ctlTop + ctlH * 0.46f)
-    val throttleLever = RectF(w * 0.278f, ctlTop, w * 0.394f, ctlTop + ctlH)
-    val sparkLever = RectF(w * 0.418f, ctlTop, w * 0.534f, ctlTop + ctlH)
-    val mixtureKnobR = minOf(w * 0.084f, ctlH * 0.33f)
-    val mixtureKnob = Pt(w * 0.662f, ctlTop + ctlH * 0.44f)
-    val excitationKnobR = minOf(w * 0.084f, ctlH * 0.33f)
-    val excitationKnob = Pt(w * 0.872f, ctlTop + ctlH * 0.44f)
+    /** Height of the engraved header strip at the top of each panel. */
+    fun panelHeader(r: RectF): Float = r.height() * 0.145f
 
-    /** Starting gear and the auxiliaries along the bottom of the control deck. */
-    private val auxTop = ctlTop + ctlH + cd.height() * 0.038f
-    private val auxH = cd.bottom - auxTop - cd.height() * 0.030f
-    val compRelease = RectF(w * 0.026f, auxTop + auxH * 0.02f, w * 0.208f, auxTop + auxH * 0.80f)
-    val primerButton = Pt(w * 0.272f, auxTop + auxH * 0.40f)
-    val primerR = minOf(w * 0.052f, auxH * 0.26f)
-    val crankHandle = Pt(w * 0.442f, auxTop + auxH * 0.40f)
-    val crankR = minOf(w * 0.080f, auxH * 0.34f)
-    val starterButton = Pt(w * 0.612f, auxTop + auxH * 0.40f)
-    val starterR = minOf(w * 0.052f, auxH * 0.26f)
-    val waterWheelR = minOf(w * 0.058f, auxH * 0.28f)
-    val waterWheel = Pt(w * 0.758f, auxTop + auxH * 0.40f)
-    val oilerWheelR = minOf(w * 0.058f, auxH * 0.28f)
-    val oilerWheel = Pt(w * 0.912f, auxTop + auxH * 0.40f)
+    // --- ENGINE panel ---------------------------------------------------------
+    private val ep = enginePanel
+    private val epBody = ep.top + panelHeader(ep)
+    private val epH = ep.bottom - epBody
+
+    val engR = minOf(w * 0.078f, epH * 0.30f)
+    val tachometer = Pt(ep.left + w * 0.098f, epBody + epH * 0.310f)
+
+    val keySwitchR = minOf(w * 0.077f, epH * 0.285f)
+    val keySwitch = Pt(w * 0.325f, epBody + epH * 0.310f)
+    val throttleLever = RectF(w * 0.450f, epBody + epH * 0.030f, w * 0.560f, epBody + epH * 0.600f)
+    val sparkLever = RectF(w * 0.585f, epBody + epH * 0.030f, w * 0.695f, epBody + epH * 0.600f)
+    val mixtureKnobR = minOf(w * 0.072f, epH * 0.245f)
+    val mixtureKnob = Pt(w * 0.855f, epBody + epH * 0.290f)
+
+    /** Starting gear along the foot of the engine panel. */
+    private val startTop = epBody + epH * 0.670f
+    private val startH = ep.bottom - startTop - epH * 0.030f
+    val compRelease = RectF(ep.left + w * 0.020f, startTop, ep.left + w * 0.215f, startTop + startH * 0.94f)
+    val primerButton = Pt(w * 0.360f, startTop + startH * 0.42f)
+    val primerR = minOf(w * 0.050f, startH * 0.30f)
+    val starterButton = Pt(w * 0.560f, startTop + startH * 0.42f)
+    val starterR = minOf(w * 0.062f, startH * 0.36f)
+
+    // --- OIL AND WATER panel --------------------------------------------------
+    private val op = oilWaterPanel
+    private val opBody = op.top + panelHeader(op)
+    private val opH = op.bottom - opBody
+
+    val auxGaugeR = minOf(w * 0.070f, opH * 0.42f)
+    val oilGauge = Pt(w * 0.130f, opBody + opH * 0.470f)
+    val tempGauge = Pt(w * 0.375f, opBody + opH * 0.470f)
+    val oilerWheelR = minOf(w * 0.058f, opH * 0.335f)
+    val oilerWheel = Pt(w * 0.630f, opBody + opH * 0.400f)
+    val waterWheelR = minOf(w * 0.058f, opH * 0.335f)
+    val waterWheel = Pt(w * 0.855f, opBody + opH * 0.400f)
+
+    // --- GENERATOR panel ------------------------------------------------------
+    private val gp = generatorPanel
+    private val gpBody = gp.top + panelHeader(gp)
+    private val gpH = gp.bottom - gpBody
+
+    val excitationKnobR = minOf(w * 0.070f, gpH * 0.395f)
+    val excitationKnob = Pt(w * 0.150f, gpBody + gpH * 0.450f)
+    /** Edgewise meters for the field, alongside the rheostat. */
+    val fieldMeter = RectF(w * 0.310f, gpBody + gpH * 0.300f, w * 0.640f, gpBody + gpH * 0.430f)
+    val varMeter = RectF(w * 0.310f, gpBody + gpH * 0.630f, w * 0.640f, gpBody + gpH * 0.760f)
+    val powerFactorAt = Pt(w * 0.830f, gpBody + gpH * 0.480f)
 
     // ---------------------------------------------------------------- electrical deck
     /** The mimic diagram takes the upper part of the switchboard. */
