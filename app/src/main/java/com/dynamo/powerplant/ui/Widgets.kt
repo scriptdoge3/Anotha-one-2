@@ -222,12 +222,15 @@ object Widgets {
         val cx = r.centerX()
         val w = r.width()
 
-        Theme.engrave(c, title, cx, r.top + r.height() * 0.115f, Theme.fitSize(title, w * 0.20f, w * 0.98f),
-            Theme.dim(Theme.NICKEL_LIT, ambient))
+        Theme.engrave(
+            c, title, cx, r.top + r.height() * 0.115f,
+            Theme.fitSize(title, minOf(w * 0.20f, r.height() * 0.130f), w * 0.98f),
+            Theme.dim(Theme.NICKEL_LIT, ambient)
+        )
 
         // The blade is short enough that swinging it open stays inside its own
         // column on the board, which is how they were spaced in practice.
-        val len = w * 0.66f
+        val len = minOf(w * 0.66f, r.height() * 0.44f)
         val hingeY = r.top + r.height() * 0.30f
         val jawY = hingeY + len
 
@@ -278,8 +281,11 @@ object Widgets {
             Theme.line(Theme.dim(Theme.DANGER, ambient), 3f))
 
         if (sub.isNotEmpty()) {
-            Theme.engrave(c, sub, cx, r.bottom - r.height() * 0.015f, Theme.fitSize(sub, w * 0.165f, w * 0.95f),
-                Theme.dim(if (blown) Theme.DANGER else Theme.NICKEL_DARK, ambient))
+            Theme.engrave(
+                c, sub, cx, r.bottom - r.height() * 0.015f,
+                Theme.fitSize(sub, minOf(w * 0.165f, r.height() * 0.105f), w * 0.95f),
+                Theme.dim(if (blown) Theme.DANGER else Theme.NICKEL_DARK, ambient)
+            )
         }
     }
 

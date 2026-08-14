@@ -28,28 +28,35 @@ import kotlin.math.sin
 object Mimic {
 
     // Where each piece of apparatus sits, as a fraction of the mimic rectangle.
-    // High tension down the left, generator volts across the middle, and the
-    // emergency circuit running out to the right and back down onto its line.
-    private const val BUS_Y = 0.085f
-    private const val UNIT_X = 0.130f
-    private const val UNIT_BKR_Y = 0.200f
-    private const val MAIN_TX_Y = 0.315f
-    private const val GEN_BUS_Y = 0.430f
-    private const val GEN_Y = 0.560f
+    // High tension down the left, generator volts across the middle, and below
+    // it the plant's two internal buses: the main bus on the left carrying the
+    // regular gear, the emergency circuit running out to the right and back
+    // down onto its own line.
+    private const val BUS_Y = 0.070f
+    private const val UNIT_X = 0.090f
+    private const val UNIT_BKR_Y = 0.170f
+    private const val MAIN_TX_Y = 0.265f
+    private const val GEN_BUS_Y = 0.360f
+    private const val GEN_Y = 0.470f
 
-    private const val EMG_BKR_X = 0.375f
-    private const val EMG_BKR_Y = 0.545f
-    private const val CHAIN_Y = 0.660f
-    private const val EMG_TX_X = 0.510f
-    private const val BATT_X = 0.670f
-    private const val BATT_BKR_X = 0.820f
+    private const val STATION_TX_X = 0.215f
+    private const val STATION_TX_Y = 0.455f
+    private const val MAIN_BUS_Y = 0.560f
+    private const val MAIN_LOAD_Y = 0.680f
+    private const val GEN_TAP_X = 0.455f
 
-    private const val AUX_X = 0.208f
-    private const val START_X = 0.945f
-    private const val START_TX_Y = 0.315f
+    private const val EMG_BKR_X = 0.520f
+    private const val EMG_BKR_Y = 0.455f
+    private const val CHAIN_Y = 0.575f
+    private const val EMG_TX_X = 0.655f
+    private const val BATT_X = 0.780f
+    private const val BATT_BKR_X = 0.890f
 
-    private const val LINE_Y = 0.800f
-    private const val LOAD_Y = 0.905f
+    private const val START_X = 0.955f
+    private const val START_TX_Y = 0.265f
+
+    private const val LINE_Y = 0.815f
+    private const val LOAD_Y = 0.925f
 
     fun draw(c: Canvas, r: RectF, p: Plant, ambient: Float, phase: Float) {
         fun x(f: Float) = r.left + r.width() * f
@@ -80,8 +87,8 @@ object Mimic {
 
         // ================= high tension: the grid and the unit =================
         val hv = level(Theme.HV_LIVE, Theme.HV_DEAD, gridLive, ambient)
-        bar(c, x(0.050f), x(0.965f), y(BUS_Y), u * 0.95f, hv, gridLive, phase, 0.5f, ambient)
-        Theme.miniPlate(c, x(0.330f), y(BUS_Y) - u * 1.7f, "GRID  2300 V", u * 0.62f, ambient)
+        bar(c, x(0.040f), x(0.972f), y(BUS_Y), u * 0.95f, hv, gridLive, phase, 0.5f, ambient)
+        Theme.miniPlate(c, x(0.360f), y(BUS_Y) - u * 1.6f, "GRID  2300 V", u * 0.62f, ambient)
 
         val ux = x(UNIT_X)
         // grid bus down to the unit breaker, and on into the main transformer
@@ -92,18 +99,42 @@ object Mimic {
         val hvOut = level(Theme.HV_LIVE, Theme.HV_DEAD, txOutLive, ambient)
         run(c, ux, y(UNIT_BKR_Y) + u * 1.0f, ux, y(MAIN_TX_Y) - u * 1.3f, u * 0.62f, hvOut, txOutLive, phase, 0.4f, ambient)
         transformer(c, ux, y(MAIN_TX_Y), u * 1.3f, hvOut, ambient)
-        Theme.miniPlate(c, ux + u * 4.8f, y(MAIN_TX_Y), "MAIN TRANSFORMER", u * 0.58f, ambient)
+        Theme.miniPlate(c, ux + u * 4.9f, y(MAIN_TX_Y), "MAIN TRANSFORMER", u * 0.58f, ambient)
 
         // ================= generator terminals =================================
         // Everything the plant runs on comes off this bar, one way or another.
         val ac = level(Theme.AC_LIVE, Theme.AC_DEAD, genLive, ambient)
         run(c, ux, y(MAIN_TX_Y) + u * 1.3f, ux, y(GEN_BUS_Y), u * 0.62f, ac, genLive, phase, -0.4f, ambient)
-        bar(c, x(0.060f), x(0.880f), y(GEN_BUS_Y), u * 0.85f, ac, genLive, phase, 0.4f, ambient)
-        Theme.miniPlate(c, x(0.680f), y(GEN_BUS_Y) - u * 1.6f, "GENERATOR TERMINALS  2300 V", u * 0.56f, ambient)
+        bar(c, x(0.045f), x(0.900f), y(GEN_BUS_Y), u * 0.85f, ac, genLive, phase, 0.4f, ambient)
+        Theme.miniPlate(c, x(0.700f), y(GEN_BUS_Y) - u * 1.6f, "GENERATOR TERMINALS  2300 V", u * 0.56f, ambient)
 
         run(c, ux, y(GEN_BUS_Y), ux, y(GEN_Y) - u * 1.5f, u * 0.62f, ac, genLive, phase, -0.4f, ambient)
         machine(c, ux, y(GEN_Y), u * 1.5f, ac, ambient)
         Theme.miniPlate(c, ux, y(GEN_Y) + u * 2.5f, "GENERATOR  500 kW", u * 0.58f, ambient)
+
+        // ================= the main bus ========================================
+        // The regular controls and pumps, fed off the generator terminals through
+        // the station transformer. Dead until the machine is making volts.
+        val stx = x(STATION_TX_X)
+        val mainLive = p.mainBus.volts > 0.05
+        val stationCol = level(Theme.AC_LIVE, Theme.AC_DEAD, mainLive, ambient)
+        run(c, stx, y(GEN_BUS_Y), stx, y(STATION_TX_Y) - u * 1.15f, u * 0.62f, ac, genLive, phase, 0.4f, ambient)
+        transformer(c, stx, y(STATION_TX_Y), u * 1.15f, stationCol, ambient)
+        Theme.miniPlate(c, stx + u * 4.6f, y(STATION_TX_Y), "STATION TX", u * 0.56f, ambient)
+        run(c, stx, y(STATION_TX_Y) + u * 1.15f, stx, y(MAIN_BUS_Y), u * 0.62f, stationCol, mainLive, phase, 0.4f, ambient)
+
+        bar(c, x(0.160f), x(0.430f), y(MAIN_BUS_Y), u * 0.85f, stationCol, mainLive, phase, 0.4f, ambient)
+        Theme.miniPlate(c, x(0.410f), y(MAIN_BUS_Y) - u * 1.5f, "MAIN BUS", u * 0.60f, ambient)
+
+        for (i in p.mainBus.loads.indices) {
+            val l = p.mainBus.loads[i]
+            val lx = x(0.185f + i * 0.068f)
+            val col = level(Theme.AC_LIVE, Theme.AC_DEAD, l.running, ambient)
+            run(c, lx, y(MAIN_BUS_Y), lx, y(MAIN_LOAD_Y) - u * 1.9f, u * 0.55f, col, l.running, phase, 0.4f, ambient)
+            device(c, lx, y(MAIN_LOAD_Y) - u * 1.25f, u * 0.66f, p.ctl.mainClosed[i] && !l.fuseBlown, col, ambient)
+            fuseSymbol(c, lx, y(MAIN_LOAD_Y) - u * 0.02f, u * 0.56f, l.fuseBlown, col, ambient)
+            Theme.miniPlate(c, lx, y(MAIN_LOAD_Y) + u * 1.25f, l.shortName, u * 0.52f, ambient)
+        }
 
         // ================= emergency circuit ===================================
         // Straight off the generator terminals, through its own breaker and its
@@ -127,18 +158,18 @@ object Mimic {
         val bx = x(BATT_X)
         val dc = level(Theme.DC_LIVE, Theme.DC_DEAD, charging || battService, ambient)
         val chargeCol = level(Theme.DC_LIVE, Theme.DC_DEAD, charging, ambient)
-        run(c, etx + u * 1.15f, y(CHAIN_Y), bx - u * 1.5f, y(CHAIN_Y), u * 0.62f, chargeCol, charging, phase, 0.4f, ambient)
-        battery(c, bx, y(CHAIN_Y), u * 1.5f, p.engine.batteryCharge.toFloat(), dc, battService, charging, ambient)
-        Theme.miniPlate(c, bx, y(CHAIN_Y) - u * 2.3f, "BATTERY", u * 0.60f, ambient)
+        run(c, etx + u * 1.15f, y(CHAIN_Y), bx - u * 1.4f, y(CHAIN_Y), u * 0.62f, chargeCol, charging, phase, 0.4f, ambient)
+        battery(c, bx, y(CHAIN_Y), u * 1.4f, p.engine.batteryCharge.toFloat(), dc, battService, charging, ambient)
+        Theme.miniPlate(c, bx, y(CHAIN_Y) - u * 2.2f, "BATTERY", u * 0.60f, ambient)
 
         // The battery's own output. It is only alive when the cells are actually
         // the thing holding the line up; while they are charging the current is
         // coming the other way, in from the transformer.
         val bbx = x(BATT_BKR_X)
         val outCol = level(Theme.DC_LIVE, Theme.DC_DEAD, battService, ambient)
-        run(c, bx + u * 1.5f, y(CHAIN_Y), bbx - u * 0.95f, y(CHAIN_Y), u * 0.62f, outCol, battService, phase, 0.4f, ambient)
+        run(c, bx + u * 1.4f, y(CHAIN_Y), bbx - u * 0.95f, y(CHAIN_Y), u * 0.62f, outCol, battService, phase, 0.4f, ambient)
         deviceH(c, bbx, y(CHAIN_Y), u, battBkrClosed, outCol, ambient)
-        Theme.miniPlate(c, bbx, y(CHAIN_Y) - u * 3.4f, "BATTERY BREAKER", u * 0.56f, ambient)
+        Theme.miniPlate(c, bbx, y(CHAIN_Y) - u * 3.3f, "BATTERY BREAKER", u * 0.56f, ambient)
 
         // down onto the line, through the selector's own emergency contact
         run(c, bbx, y(CHAIN_Y) + u * 0.95f, bbx, y(LINE_Y) - u * 2.15f, u * 0.62f, outCol, battService, phase, 0.4f, ambient)
@@ -147,29 +178,22 @@ object Mimic {
 
         // ================= the emergency line ==================================
         val lineCol = level(Theme.DC_LIVE, Theme.DC_DEAD, lineLive, ambient)
-        bar(c, x(0.060f), x(0.965f), y(LINE_Y), u * 0.85f, lineCol, lineLive, phase, 0.4f, ambient)
-        val hdr = if (p.service.overloaded) "EMERGENCY LINE   OVERLOAD"
-        else "EMERGENCY LINE   %.1f / %.1f kW".format(p.service.demandKw, p.service.capacityKw)
-        Theme.engrave(
-            c, hdr, x(0.960f), y(LINE_Y) + u * 2.0f, u * 0.66f,
-            Theme.dim(if (p.service.overloaded) Theme.DANGER else Theme.MARK_SOFT, ambient),
-            Paint.Align.RIGHT
-        )
+        bar(c, x(0.040f), x(0.972f), y(LINE_Y), u * 0.85f, lineCol, lineLive, phase, 0.4f, ambient)
+        Theme.miniPlate(c, x(0.640f), y(LINE_Y) + u * 1.7f, "EMERGENCY LINE", u * 0.60f, ambient)
 
-        // the shaft-driven auxiliary set's tap off the generator terminals
-        val axx = x(AUX_X)
+        // the tie across from the main bus: the machine carrying its own line
+        val gtx = x(GEN_TAP_X)
         val genTap = level(Theme.AC_LIVE, Theme.AC_DEAD, genService, ambient)
-        run(c, axx, y(GEN_BUS_Y), axx, y(LINE_Y) - u * 2.15f, u * 0.62f, genTap, genService, phase, 0.4f, ambient)
-        Theme.miniPlate(c, axx + u * 3.0f, y(CHAIN_Y), "AUX SET", u * 0.56f, ambient)
-        tap(c, axx, y(LINE_Y) - u * 1.35f, u * 0.78f, genService, genTap, ambient)
-        run(c, axx, y(LINE_Y) - u * 0.57f, axx, y(LINE_Y), u * 0.62f, genTap, genService, phase, 0.4f, ambient)
+        run(c, gtx, y(MAIN_BUS_Y), gtx, y(LINE_Y) - u * 2.15f, u * 0.62f, genTap, genService, phase, 0.4f, ambient)
+        tap(c, gtx, y(LINE_Y) - u * 1.35f, u * 0.78f, genService, genTap, ambient)
+        run(c, gtx, y(LINE_Y) - u * 0.57f, gtx, y(LINE_Y), u * 0.62f, genTap, genService, phase, 0.4f, ambient)
 
         // the grid's tap, down through the starting transformer
         val sx = x(START_X)
         run(c, sx, y(BUS_Y), sx, y(START_TX_Y) - u * 1.15f, u * 0.62f, hv, gridLive, phase, 0.4f, ambient)
         val startCol = level(Theme.AC_LIVE, Theme.AC_DEAD, gridService, ambient)
         transformer(c, sx, y(START_TX_Y), u * 1.15f, startCol, ambient)
-        Theme.miniPlate(c, sx - u * 5.4f, y(START_TX_Y), "STARTING TX", u * 0.56f, ambient)
+        Theme.miniPlate(c, sx - u * 5.2f, y(START_TX_Y), "STARTING TX", u * 0.56f, ambient)
         run(c, sx, y(START_TX_Y) + u * 1.15f, sx, y(LINE_Y) - u * 2.15f, u * 0.62f, startCol, gridService, phase, 0.4f, ambient)
         tap(c, sx, y(LINE_Y) - u * 1.35f, u * 0.78f, gridService, startCol, ambient)
         run(c, sx, y(LINE_Y) - u * 0.57f, sx, y(LINE_Y), u * 0.62f, startCol, gridService, phase, 0.4f, ambient)
@@ -177,12 +201,12 @@ object Mimic {
         // ================= the loads on the emergency line =====================
         for (i in p.service.loads.indices) {
             val l = p.service.loads[i]
-            val lx = x(0.110f + i * 0.150f)
+            val lx = x(0.065f + i * 0.092f)
             val col = level(Theme.DC_LIVE, Theme.DC_DEAD, l.running, ambient)
-            run(c, lx, y(LINE_Y), lx, y(LOAD_Y) - u * 2.0f, u * 0.55f, col, l.running, phase, 0.4f, ambient)
-            device(c, lx, y(LOAD_Y) - u * 1.35f, u * 0.72f, p.ctl.auxClosed[i] && !l.fuseBlown, col, ambient)
-            fuseSymbol(c, lx, y(LOAD_Y) - u * 0.05f, u * 0.62f, l.fuseBlown, col, ambient)
-            Theme.miniPlate(c, lx, y(LOAD_Y) + u * 1.35f, l.shortName, u * 0.56f, ambient)
+            run(c, lx, y(LINE_Y), lx, y(LOAD_Y) - u * 1.9f, u * 0.55f, col, l.running, phase, 0.4f, ambient)
+            device(c, lx, y(LOAD_Y) - u * 1.25f, u * 0.66f, p.ctl.auxClosed[i] && !l.fuseBlown, col, ambient)
+            fuseSymbol(c, lx, y(LOAD_Y) - u * 0.02f, u * 0.56f, l.fuseBlown, col, ambient)
+            Theme.miniPlate(c, lx, y(LOAD_Y) + u * 1.25f, l.shortName, u * 0.52f, ambient)
         }
     }
 

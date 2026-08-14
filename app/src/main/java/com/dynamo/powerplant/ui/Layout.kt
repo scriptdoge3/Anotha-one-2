@@ -130,40 +130,54 @@ class Layout(val w: Float, val h: Float) {
     // ---------------------------------------------------------------- electrical deck
     /** The mimic diagram takes the upper part of the switchboard. */
     val mimic = RectF(
-        w * 0.020f, deck.top + deck.height() * 0.028f,
-        w * 0.980f, deck.top + deck.height() * 0.555f
+        w * 0.020f, deck.top + deck.height() * 0.024f,
+        w * 0.980f, deck.top + deck.height() * 0.508f
     )
 
     val boardPlate = RectF(
-        w * 0.020f, mimic.bottom + deck.height() * 0.035f,
-        w * 0.980f, deck.bottom - deck.height() * 0.022f
+        w * 0.020f, mimic.bottom + deck.height() * 0.026f,
+        w * 0.980f, deck.bottom - deck.height() * 0.018f
     )
     val mainBreaker = RectF(
-        boardPlate.left + w * 0.020f, boardPlate.top + boardPlate.height() * 0.070f,
-        boardPlate.left + w * 0.240f, boardPlate.bottom - boardPlate.height() * 0.060f
+        boardPlate.left + w * 0.018f, boardPlate.top + boardPlate.height() * 0.060f,
+        boardPlate.left + w * 0.215f, boardPlate.bottom - boardPlate.height() * 0.050f
     )
 
     /**
-     * The knife switches along the board: the emergency transformer breaker, the
-     * battery breaker, and then the four loads on the emergency line.
+     * The board carries two rows of knife switches to the right of the unit
+     * breaker: the main bus above, the emergency line below.
      */
-    private val switchRow: List<RectF> = run {
-        val left = mainBreaker.right + w * 0.018f
-        val right = boardPlate.right - w * 0.014f
-        val each = (right - left) / 6f
-        (0 until 6).map {
-            RectF(left + each * it + each * 0.05f, mainBreaker.top, left + each * (it + 1) - each * 0.05f, mainBreaker.bottom)
+    private val rowsLeft = mainBreaker.right + w * 0.016f
+    private val rowsRight = boardPlate.right - w * 0.012f
+    private val rowsTop = boardPlate.top + boardPlate.height() * 0.055f
+    private val rowsH = boardPlate.height() * 0.900f
+    private val rowGap = boardPlate.height() * 0.030f
+
+    val mainRowLabel = RectF(rowsLeft, rowsTop, rowsRight, rowsTop + rowsH * 0.075f)
+    private val mainRow = RectF(rowsLeft, mainRowLabel.bottom, rowsRight, rowsTop + rowsH * 0.485f)
+    val emgRowLabel = RectF(rowsLeft, mainRow.bottom + rowGap, rowsRight, mainRow.bottom + rowGap + rowsH * 0.075f)
+    private val emgRow = RectF(rowsLeft, emgRowLabel.bottom, rowsRight, rowsTop + rowsH)
+
+    private fun cells(r: RectF, n: Int): List<RectF> {
+        val each = r.width() / n
+        return (0 until n).map {
+            RectF(r.left + each * it + each * 0.05f, r.top, r.left + each * (it + 1) - each * 0.05f, r.bottom)
         }
     }
 
+    /** The regular controls and pumps: control supply, circulating pump, oil pump, lights. */
+    val mainSwitches: List<RectF> = cells(mainRow, 4)
+
+    private val emgCells = cells(emgRow, 6)
+
     /** Generator to the emergency transformer, the road the charge takes. */
-    val emgTxBreaker: RectF = switchRow[0]
+    val emgTxBreaker: RectF = emgCells[0]
 
     /** Battery out to the emergency line. */
-    val batteryBreaker: RectF = switchRow[1]
+    val batteryBreaker: RectF = emgCells[1]
 
     /** The four emergency line switches on the board. */
-    val auxSwitches: List<RectF> = switchRow.subList(2, 6)
+    val auxSwitches: List<RectF> = emgCells.subList(2, 6)
 
     // ---------------------------------------------------------------- annunciator
     val alarmR = minOf(w * 0.026f, annunciator.height() * 0.30f)

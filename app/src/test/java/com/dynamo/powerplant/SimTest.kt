@@ -86,7 +86,11 @@ class SimTest {
         run(p, 6.0)
         p.engine.starterEngaged = false
 
-        run(p, 50.0) { tend(it) }
+        // Bring the field up as soon as it will stand it: the main bus hangs off
+        // the station transformer, and until it is alive there is no circulating
+        // pump, no oil pump and nothing for the tie to carry.
+        p.ctl.excitation = 0.60
+        run(p, 55.0) { tend(it) }
         sweepKeyTo(p, IgnitionMode.GEN, 0.25)   // a brisk sweep across the dead notch
         run(p, 15.0) { tend(it) }
         return p.running && !p.ended
@@ -110,12 +114,18 @@ class SimTest {
     }
 
     @Test
-    fun theExciterGivesNothingAtRestButFiresWhenTurning() {
+    fun theMainBusTieGivesNothingUntilTheMachineIsExcited() {
         val p = Plant(1)
         p.ctl.ignition = IgnitionMode.GEN
-        assertTrue("the exciter must be dead at rest", p.engine.sourceStrength(p.ctl, 0.0) < 0.02)
-        assertTrue("still weak at cranking speed", p.engine.sourceStrength(p.ctl, 90.0) < 0.35)
-        assertTrue("strong once up to speed", p.engine.sourceStrength(p.ctl, 600.0) > 0.9)
+        // Stone cold: no volts on the terminals, so no station transformer, so
+        // no main bus and nothing for the tie to carry.
+        run(p, 1.0)
+        assertTrue("the tie must be dead at rest", p.engine.sourceStrength(p.ctl, 0.0) < 0.02)
+
+        // Turning and excited, it is as good a supply as the machine is.
+        assertTrue(startEngine(p))
+        assertTrue("the main bus should be alive", p.mainBus.volts > 0.9)
+        assertTrue("and the tie with it", p.engine.sourceStrength(p.ctl, p.rpm) > 0.9)
     }
 
     @Test
@@ -149,7 +159,7 @@ class SimTest {
         // Drive the engine and the internal bus directly, so the grid can be
         // taken away outright without waiting for the whole system to collapse.
         val engine = Engine()
-        val service = Service()
+        val service = Service.emergencyLine()
         val ctl = Controls()
         ctl.ignition = IgnitionMode.GRID
         ctl.throttle = 0.5
@@ -160,10 +170,10 @@ class SimTest {
         engine.busSupplyPu = 1.0
 
         fun tick() {
-            service.step(1.0 / 60.0, ctl, engine.sourceStrength(ctl, 600.0), Service.CAPACITY_GRID_KW)
+            service.step(1.0 / 60.0, ctl.auxClosed, engine.sourceStrength(ctl, 600.0), Service.CAPACITY_GRID_KW)
             engine.serviceVolts = service.volts
             engine.ignitionLive = service.isRunning(Service.IGNITION)
-            engine.waterPumpRunning = service.isRunning(Service.PUMP)
+            engine.coolantFlowPu = if (service.isRunning(Service.EMG_PUMP)) 0.42 else 0.0
             engine.step(1.0 / 60.0, ctl, 600.0)
         }
 
@@ -232,11 +242,18 @@ class SimTest {
             slow.rpm < before - 120.0
         )
 
-        // It will pick up again the moment a live position is reached, so long as
-        // there is still speed enough in the flywheel for the exciter.
+        // And GEN cannot save it. The field is a load on the line, so a long
+        // spell on the dead notch leaves the machine unexcited, the station
+        // transformer with nothing to work on, and the main bus dead. Only the
+        // battery can put the fire back.
         slow.ctl.ignition = IgnitionMode.GEN
         run(slow, 10.0) { tend(it) }
-        assertTrue("landing on GEN with speed left must relight it", slow.running)
+        assertTrue("a de-excited machine cannot carry its own line", !slow.running)
+        assertTrue("and the main bus should be dead with it", slow.mainBus.volts < 0.05)
+
+        slow.ctl.ignition = IgnitionMode.EMG
+        run(slow, 8.0) { tend(it) }
+        assertTrue("but the cells will relight it", slow.engine.firingSuccess > 0.5)
     }
 
     // ------------------------------------------------------------------ starting
@@ -538,28 +555,29 @@ class SimTest {
         val p = Plant(52)
         p.ctl.ignition = IgnitionMode.EMG
         // Everything switched in at once is more than the cells will carry.
-        p.ctl.auxClosed[Service.LIGHTS] = true
+        p.ctl.auxClosed[Service.EMG_LIGHTS] = true
         run(p, 2.0)
         assertTrue("the emergency line should be overloaded", p.service.overloaded)
         assertTrue("and its volts should have sagged, was ${p.service.volts}", p.service.volts < 0.90)
 
         // Shed the lights and it comes back up.
-        p.ctl.auxClosed[Service.LIGHTS] = false
+        p.ctl.auxClosed[Service.EMG_LIGHTS] = false
         run(p, 2.0)
         assertTrue("shedding load must restore the line", !p.service.overloaded)
         assertTrue("volts back up, was ${p.service.volts}", p.service.volts > 0.9)
     }
 
     @Test
-    fun losingTheWaterPumpCooksTheEngineEvenWithTheGateOpen() {
+    fun losingThePumpsCooksTheEngineEvenWithTheGateOpen() {
         val p = Plant(53)
         assertTrue(startEngine(p))
-        p.ctl.waterValve = 1.0            // gate wide open, but the pump is switched out
+        p.ctl.waterValve = 1.0            // gate wide open, but both pumps are out
         run(p, 400.0) { pl ->
             trim(pl)
             holdSpeed(pl, 60.0)
             pl.ctl.waterValve = 1.0
-            pl.ctl.auxClosed[Service.PUMP] = false
+            pl.ctl.mainClosed[Service.CIRC_PUMP] = false
+            pl.ctl.auxClosed[Service.EMG_PUMP] = false
         }
         assertTrue(
             "with no circulating pump the engine must cook, ended with ${p.failure}",

@@ -12,9 +12,10 @@ package com.dynamo.powerplant.sim
  *  GRID  tapped off the grid bus through the starting transformer. Full and
  *        steady at any speed, but it dies with the bus, so a collapse takes
  *        your ignition and your field with it.
- *  GEN   the machine's own shaft-driven auxiliary set. Nothing at rest,
- *        strengthening with speed. Self sufficient, and where you want to be
- *        once running.
+ *  GEN   tied across to the main bus, which is the machine carrying its own
+ *        emergency line. Self sufficient, and where you want to be once
+ *        running — but the machine has to be excited first, and the field is
+ *        one of the loads on the line it is holding up.
  *  OFF   dead.
  *  EMG   the battery, through the battery breaker. A fat spark at cranking
  *        speed that fades as the revolutions rise, and it is the only position
@@ -88,8 +89,16 @@ class Controls {
      */
     var batteryBreakerClosed: Boolean = true
     /**
+     * The regular running gear on the main bus, in the order it sits on the
+     * board: control supply, circulating pump, oil pump, house lights. All in at
+     * handover — the main bus is dead until the machine makes volts, so there is
+     * nothing to be gained by leaving them out.
+     */
+    val mainClosed = booleanArrayOf(true, true, true, true)
+
+    /**
      * The loads on the emergency line, in the order they sit on the board:
-     * ignition, excitation, emergency pumps, emergency lights. The first three
+     * ignition, excitation, emergency pump, emergency lights. The first three
      * are left in at handover; the lights are your business, and the cells will
      * not carry all four at once.
      */

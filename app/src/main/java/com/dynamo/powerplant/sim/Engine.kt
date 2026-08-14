@@ -35,14 +35,27 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     /** Volts on the grid, per unit, for the GRID position of the selector. */
     var busSupplyPu: Double = 1.0
 
+    /** Volts on the main bus, per unit, for the GEN position of the selector. */
+    var mainBusPu: Double = 0.0
+
     /**
-     * Volts on the emergency line, per unit, and whether the ignition and the
-     * emergency pumps are actually switched in and running. All three are set by
-     * the Plant from the switchboard each step.
+     * Volts on the emergency line, per unit, and whether the ignition is
+     * actually switched in and running. Both are set by the Plant from the
+     * switchboard each step.
      */
     var serviceVolts: Double = 0.0
     var ignitionLive: Boolean = true
-    var waterPumpRunning: Boolean = false
+
+    /**
+     * How much cooling water is being circulated, 0..1, before the gate valve
+     * meters it. The big circulating pump on the main bus gives full flow; the
+     * emergency pump on the battery's line gives enough to nurse the engine and
+     * no more.
+     */
+    var coolantFlowPu: Double = 0.0
+
+    /** The forced-feed oil pump on the main bus, behind the mechanical lubricator. */
+    var oilPumpRunning: Boolean = false
     /** Generator terminal volts, per unit: what the emergency transformer sees. */
     var genTerminalPu: Double = 0.0
     /** Kilowatts the emergency line is drawing, for the battery drain. */
@@ -104,15 +117,17 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
     fun gridSupply(): Double = clamp((busSupplyPu - 0.62) / 0.33, 0.0, 1.0)
 
     /**
-     * The shaft-driven auxiliary set. Dead at rest, strengthening with speed,
-     * which is why it cannot start the engine but is the right place to run it.
-     * It needs no field of its own, which is what breaks the circle: the line it
-     * feeds is the line the main field hangs off.
+     * The tie across to the main bus, which is the machine carrying its own
+     * emergency line. Dead until the machine is excited and turning, which is
+     * why this position cannot start the engine and is the right place to run
+     * it — nothing outside the station can take it away.
+     *
+     * The circle closes on itself: the field is a load on the line the main bus
+     * is holding up. That is why the changeover from the battery has to be made
+     * briskly, before the field decays past the point where the machine can
+     * carry itself.
      */
-    fun generatorSupply(rpm: Double): Double {
-        val t = clamp((rpm - 55.0) / 165.0, 0.0, 1.0)
-        return clamp(t * t * (3 - 2 * t) * 1.05, 0.0, 1.0)
-    }
+    fun generatorSupply(@Suppress("UNUSED_PARAMETER") rpm: Double): Double = clamp(mainBusPu, 0.0, 1.0)
 
     /**
      * Battery terminal volts, per unit. A lead cell holds close to its nominal
@@ -244,7 +259,7 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         // line up themselves and leave the battery alone.
         if (ctl.ignition == IgnitionMode.EMG && ctl.batteryBreakerClosed) {
             // Everything switched onto the line is coming out of the cells.
-            batteryCharge = max(0.0, batteryCharge - dt * 0.0016 * (1.0 + serviceDrawKw * 0.28))
+            batteryCharge = max(0.0, batteryCharge - dt * 0.0016 * (1.0 + serviceDrawKw * 0.60))
         }
         // Charge comes back the one way it can: off the generator terminals,
         // through the emergency transformer breaker and into the cells. No
@@ -291,10 +306,10 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         val retardHeat = clamp((optimalAdvanceDeg(rpm, afr) - advance) / 26.0, 0.0, 1.0) * 1.15
         val heatIn = burnPu * 3.2 * (1.0 + leanHeat + retardHeat) + 0.04
 
-        // Water jacket. The gate meters the flow, but the circulating pump is an
-        // electric machine on the station service bus: lose that and the gate
-        // does nothing at all.
-        val flow = if (waterPumpRunning) clamp(ctl.waterValve, 0.0, 1.0) else 0.0
+        // Water jacket. The gate meters the flow, but the pumps are electric
+        // machines on the switchboard: lose both and the gate does nothing at
+        // all, and on the emergency pump alone there is only enough to nurse it.
+        val flow = clamp(ctl.waterValve, 0.0, 1.0) * clamp(coolantFlowPu, 0.0, 1.0)
         val cooling = (0.05 + 1.30 * flow) * (jacketTempC - ambientC) * 0.0535
         jacketTempC += (heatIn - cooling) * dt
         jacketTempC = max(ambientC, jacketTempC)
@@ -318,7 +333,12 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         if (ctl.oilerRate > 0.0 && oilInSump > 0.0) {
             oilInSump = max(0.0, oilInSump - dt * ctl.oilerRate * 0.0043)
         }
-        val supply = if (oilInSump > 0.0) ctl.oilerRate else 0.0
+        // The lubricator drips into a forced-feed pump on the main bus. Lose the
+        // pump and what the sight glasses show still reaches the bearings, but
+        // only what gravity will carry, so the feed has to be opened up to make
+        // up for it.
+        val pumpFactor = if (oilPumpRunning) 1.0 else 0.80
+        val supply = if (oilInSump > 0.0) ctl.oilerRate * pumpFactor else 0.0
         // Demand climbs with speed and with the load being carried.
         val demand = clamp(rpm / 600.0 * 0.55 + abs(torque) / Spec.PEAK_TORQUE * 0.42, 0.0, 1.6)
         val deficit = demand - supply
@@ -350,8 +370,9 @@ class Engine(private val rnd: Random = Random(0xC0FFEE)) {
         jacketTempC = 12.0; bearingTempC = 12.0
         oilFilm = 1.0; oilInSump = 1.0; oilPressureKpa = 0.0
         batteryCharge = 1.0; plugFouling = 0.0; floodLevel = 0.0; firingSuccess = 0.0
-        busSupplyPu = 1.0
-        serviceVolts = 0.0; ignitionLive = true; waterPumpRunning = false
+        busSupplyPu = 1.0; mainBusPu = 0.0
+        serviceVolts = 0.0; ignitionLive = true
+        coolantFlowPu = 0.0; oilPumpRunning = false
         genTerminalPu = 0.0; serviceDrawKw = 0.0
         knockIndex = 0.0; knockDamage = 0.0; bearingWear = 0.0
         starterEngaged = false; starterCranking = false; starterHeat = 0.0

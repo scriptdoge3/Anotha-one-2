@@ -305,6 +305,7 @@ class PanelRenderer(val L: Layout) {
             p.engine.oilFilm < 0.5 || p.engine.jacketTempC > 105 || p.rpm > Spec.OVERSPEED_RPM
         } else {
             p.service.loads.any { it.fuseBlown } || p.service.overloaded ||
+                p.mainBus.loads.any { it.fuseBlown } || p.mainBus.overloaded ||
                 p.outputKw < -4.0 || abs(p.outputKw - p.grid.dispatchKw()) > 14.0
         }
         if (wants) {
@@ -415,13 +416,19 @@ class PanelRenderer(val L: Layout) {
         Widgets.handwheel(
             c, L.oilerWheel.x, L.oilerWheel.y, L.oilerWheelR, p.ctl.oilerRate.toFloat(), "OILER", ambient
         )
-        // The gate is only worth anything while the pump is actually turning.
-        val pumpOn = p.engine.waterPumpRunning
+        // The gate is only worth anything while a pump is actually turning, and
+        // the emergency pump on its own is not much of a pump.
+        val flow = p.engine.coolantFlowPu
+        val label = when {
+            flow > 0.9 -> "WATER GATE"
+            flow > 0.01 -> "EMG PUMP"
+            else -> "PUMPS OUT"
+        }
         Widgets.handwheel(
             c, L.waterWheel.x, L.waterWheel.y, L.waterWheelR, p.ctl.waterValve.toFloat(),
-            if (pumpOn) "WATER GATE" else "PUMP OUT", ambient,
-            if (pumpOn) Theme.NICKEL else Theme.DANGER,
-            if (pumpOn) Theme.ACCENT else Theme.DANGER
+            label, ambient,
+            if (flow > 0.9) Theme.NICKEL else Theme.DANGER,
+            if (flow > 0.9) Theme.ACCENT else Theme.DANGER
         )
 
         // ---- GENERATOR -------------------------------------------------------
@@ -453,6 +460,30 @@ class PanelRenderer(val L: Layout) {
             c, L.mainBreaker, if (p.ctl.mainBreakerClosed) 1f else 0f, ambient,
             p.genVolts > Spec.RATED_VOLTS * 0.5
         )
+
+        // --- the main bus: the regular controls and pumps ---
+        rowCaption(
+            c, L.mainRowLabel,
+            if (p.mainBus.overloaded) "MAIN BUS   OVERLOAD"
+            else "MAIN BUS   %.1f / %.1f kW".format(p.mainBus.demandKw, p.mainBus.capacityKw),
+            p.mainBus.overloaded, ambient
+        )
+        for (i in L.mainSwitches.indices) {
+            val l = p.mainBus.loads[i]
+            Widgets.knifeSwitch(
+                c, L.mainSwitches[i], if (p.ctl.mainClosed[i]) 1f else 0f, l.shortName,
+                if (l.fuseBlown) "FUSE OUT" else "%.1f kW".format(l.kw), ambient,
+                blown = l.fuseBlown, live = l.running
+            )
+        }
+
+        // --- the emergency line, and the two breakers that make it ---
+        rowCaption(
+            c, L.emgRowLabel,
+            if (p.service.overloaded) "EMERGENCY LINE   OVERLOAD"
+            else "EMERGENCY LINE   %.1f / %.1f kW".format(p.service.demandKw, p.service.capacityKw),
+            p.service.overloaded, ambient
+        )
         Widgets.knifeSwitch(
             c, L.emgTxBreaker, if (p.ctl.emgTxBreakerClosed) 1f else 0f, "EMG TX",
             if (p.engine.batteryChargingNow) "CHARGING" else "", ambient,
@@ -473,6 +504,14 @@ class PanelRenderer(val L: Layout) {
         }
     }
 
+    /** The engraved strip naming a row of switches and what it is carrying. */
+    private fun rowCaption(c: Canvas, r: RectF, text: String, warn: Boolean, ambient: Float) {
+        Theme.engrave(
+            c, text, r.left, r.bottom, r.height() * 0.60f,
+            Theme.dim(if (warn) Theme.DANGER else Theme.MARK_SOFT, ambient), Paint.Align.LEFT
+        )
+    }
+
     private fun drawAnnunciatorLive(c: Canvas, p: Plant, ambient: Float, now: Long) {
         val e = p.engine
         val flash = if ((now / 260L) % 2L == 0L) 1f else 0.30f
@@ -483,7 +522,8 @@ class PanelRenderer(val L: Layout) {
             if (e.knockIndex > 0.45) flash else if (e.knockIndex > 0.22) 0.55f else 0f,
             if (p.outputKw < -4.0) flash else 0f,
             if (!p.service.isRunning(Service.EXCITATION) || p.gen.fieldFlux < 0.04) 0.65f else 0f,
-            if (p.service.loads.any { it.fuseBlown } || p.service.overloaded) flash else 0f,
+            if (p.service.loads.any { it.fuseBlown } || p.service.overloaded ||
+                p.mainBus.loads.any { it.fuseBlown } || p.mainBus.overloaded) flash else 0f,
             if (e.batteryCharge < 0.12) flash else if (e.batteryCharge < 0.30) 0.55f else 0f
         )
         for (i in states.indices) {

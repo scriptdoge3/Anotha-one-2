@@ -15,9 +15,13 @@ frequency — you follow it. What you do control is how much you put onto
 the bars, and the dispatcher hands you a new load order every ninety seconds.
 
 The switchboard is not for the grid. It is for the plant's own internal
-supplies: the ignition, the excitation, the emergency pumps and the emergency
-lighting all hang off one emergency line, and keeping that line alive is what
-keeps the engine and the machine alive.
+supplies, and there are two of them. The **main bus** carries the regular
+running gear — the control supply, the circulating pump, the oil pump, the house
+lights — and hangs off the generator terminals through the station transformer,
+so it is dead until the machine is turning and excited. The **emergency line**
+carries the four things the set cannot run without — the ignition, the
+excitation, the emergency pump and the emergency lights — and is normally held
+up by the battery.
 
 ## The controls
 
@@ -31,10 +35,17 @@ keeps the engine and the machine alive.
 | Mixture | 17.5:1 lean to 9.5:1 rich, as supplied to the intake |
 | Field rheostat | Excitation: terminal volts off the bus, reactive load on it |
 
-**Switchboard (internal supplies)**: the unit breaker out to the grid, the
-emergency transformer breaker, the battery breaker, and four knife switches with
-cartridge fuses feeding the plant itself — ignition (0.6 kW), excitation
-(2.2 kW), emergency pumps (14 kW) and emergency lights (3 kW).
+**Switchboard (internal supplies)**: the unit breaker out to the grid, and two
+rows of knife switches with cartridge fuses.
+
+| Main bus | | Emergency line | |
+|---|---|---|---|
+| Control supply | 1.2 kW | Emergency TX breaker | — |
+| Circulating pump | 14.0 kW | Battery breaker | — |
+| Oil pump | 5.5 kW | Ignition | 0.6 kW |
+| House lights | 3.0 kW | Excitation | 2.2 kW |
+| | | Emergency pump | 4.0 kW |
+| | | Emergency lights | 1.2 kW |
 
 **Starting gear**: relief cock, primer, and the electric starting motor, which is
 wired through the `EMG` position only.
@@ -53,9 +64,8 @@ makes between the machine and the board:
   carries the oil pressure and jacket gauges with the lubricator and water gate
   handwheels. **GENERATOR** carries the field rheostat with field and reactive
   meters and the power factor.
-- **ELECTRICAL** — the station single line, and under it the switchboard
-  carrying the unit breaker, the two emergency breakers and the four loads on
-  the emergency line.
+- **ELECTRICAL** — the station single line, and under it the switchboard: the
+  unit breaker, the main bus row, and the emergency row with its two breakers.
 
 A red pip appears on whichever tab you are not looking at when something over
 there wants attention. The annunciator strip along the foot is always live.
@@ -70,34 +80,43 @@ show as a blade swung clear of its jaws.
 ```
   ================= GRID 2300 V =========================
         |                                            |
-   UNIT BREAKER                                      |
+   UNIT BREAKER                                 STARTING TX
         |                                            |
-     MAIN TX                                    STARTING TX
+     MAIN TX                                         |
         |                                            |
-  ========+============ GENERATOR TERMINALS ======    |
-        |     |         |                             |
-     [ GEN ] AUX     EMG TX BREAKER                   |
-              |         |                             |
-              |     EMERGENCY TX -- BATTERY -- BATTERY BKR
-              |                                  |    |
-            (GEN)                              (EMG) (GRID)
-              |                                  |    |
-  ==================== EMERGENCY LINE ==================
-      |         |         |         |
-     IGN       EXC      PUMP      LIGHT
-    0.6kW    2.2kW    14.0kW     3.0kW
+  ======+========= GENERATOR TERMINALS ==========     |
+        |        |                    |              |
+     [ GEN ]  STATION TX         EMG TX BREAKER       |
+                 |                    |              |
+  ===== MAIN BUS =====+          EMERGENCY TX         |
+    |    |    |    |  |               |              |
+  CTRL CIRC  OIL LIGHT|            BATTERY           |
+   1.2 14.0  5.5  3.0 |               |              |
+                      |          BATTERY BKR         |
+                    (GEN)             |              |
+                      |             (EMG)          (GRID)
+                      |               |              |
+  ================= EMERGENCY LINE ====+==============+==
+    |      |       |       |
+   IGN    EXC   E.PUMP   E.LT
+   0.6    2.2     4.0     1.2
 ```
 
 The mimic is coloured the way a real control room panel is: **red** for the
-high tension side, **orange** for generator voltage, **green** for the emergency
-circuit. Every switching device carries a lamp, green when it is made and red
-when it is open.
+high tension side, **orange** for generator voltage and the main bus, **green**
+for the emergency circuit. Every switching device carries a lamp, green when it
+is made and red when it is open.
 
-**The emergency circuit comes straight off the generator terminals.** Through
-its own breaker, into the emergency transformer, and that is what charges the
-battery. The battery's output goes out through the battery breaker and onto the
-emergency line, which carries the emergency lights, the ignition, the excitation
-and the emergency pumps.
+**The main bus** is fed off the generator terminals through the station
+transformer, and nothing else feeds it. Until the machine is turning and excited
+there is no control supply, no circulating pump, no oil pump and no house
+lights. Getting the field up is therefore part of starting, not part of
+synchronising.
+
+**The emergency circuit comes straight off the generator terminals too.**
+Through its own breaker, into the emergency transformer, and that is what
+charges the battery. The battery's output goes out through the battery breaker
+and onto the emergency line.
 
 That is the only road the charge takes back to the cells, so with the emergency
 transformer breaker open the battery is islanded and will only ever run down —
@@ -111,20 +130,26 @@ selector is what makes it. Each load has its own switch and fuse on the board.
 Watch the battery branch: it runs one way when you are drawing off `EMG` and the
 other way when the emergency transformer is putting the cells back.
 
-**The line has a limit.** The grid and the auxiliary set will each carry 60 kW,
-which is more than the whole board asks for. The battery will carry 18 kW, which
-is barely enough — the pumps alone are 14 kW, and with the ignition and the field
-that is 16.8 kW of the 18. Switch the lights in as well and it goes over.
-Overload it far enough and the volts sag until loads drop out, and then a fuse
-goes.
+**The emergency line has a hard limit.** The grid will carry 60 kW into it and
+the main bus 40 kW, both more than it asks for. The battery will carry 7 kW,
+which is barely enough — the ignition, the field and the emergency pump come to
+6.8 kW of it. Switch the emergency lights in as well and it goes over. Overload
+it far enough and the volts sag until loads drop out, and then a fuse goes.
 
 **The excitation is a load on that line.** Pull that switch, or let the line
-collapse, and the field goes with it — which off the bus means no volts and on
-the bus means a pole slip.
+collapse, and the field goes with it — which off the bus means no volts, on the
+bus means a pole slip, and on `GEN` means the main bus dies and takes the line
+with it.
 
-**The cooling water pumps are electric machines on that line too.** The gate
-valve on the control deck meters the flow, but if the pumps are not running the
-gate does nothing at all and the engine will cook with the valve wide open.
+**There are two pumps and they are on different buses.** The gate valve on the
+control deck meters the flow, but the circulating pump on the main bus is what
+provides it. The emergency pump on the battery's line gives about four tenths of
+that, which is enough to nurse a cold engine and not enough to run one. With
+both switched out the gate does nothing at all.
+
+**The oil pump is on the main bus behind the mechanical lubricator.** Lose it
+and only what gravity will carry reaches the bearings, so the feed has to be
+opened up to make up for it.
 
 ## The supply selector
 
@@ -140,9 +165,11 @@ GRID --- GEN --- OFF --- EMG
   steady at any speed, so it will start a stone cold engine. But it fades as the
   grid volts sag, which means the ignition and the field go weak exactly when
   the system is in trouble and you most need the machine.
-- **GEN** — the machine's own shaft-driven auxiliary set. Nothing at rest,
-  strengthening with speed. It cannot start the engine, and it is the right
-  place to run it, because nothing outside the station can take it away.
+- **GEN** — tied across to the main bus, which is the machine carrying its own
+  emergency line. Dead until the machine is excited, so it cannot start the
+  engine, and it is the right place to run it because nothing outside the
+  station can take it away. The circle closes on itself: the field is one of the
+  loads on the line the main bus is holding up.
 - **OFF** — dead.
 - **EMG** — the battery, through the battery breaker. A fat spark at cranking
   speed that fades as the revolutions rise, and the only position that will turn
@@ -150,9 +177,10 @@ GRID --- GEN --- OFF --- EMG
   emergency transformer, and that wants an excited machine.
 
 The layout is the point: `EMG` is where you start and `GEN` is where you run,
-and getting between them means passing through `OFF` with no ignition at all.
-Do it briskly. Dawdle long enough and the engine coasts below the speed the
-auxiliary set needs, so landing on `GEN` cannot relight it and you are back to the
+and getting between them means passing through `OFF` with no ignition at all —
+and with no excitation either. Do it briskly. Dawdle and the field decays past
+the point where the station transformer has anything to work on, so the main bus
+never comes up, landing on `GEN` gives you nothing, and you are back to the
 battery.
 
 ## Getting the engine lit, cold
@@ -177,8 +205,11 @@ The longer version, and what each of those settings is for:
    up faster. Shut it again before it can fire — with the cock open no charge
    will light at all.
 6. **Do not sit on the starter.** The cells also carry the ignition, the field
-   and the 14 kW cooling water pumps, so emergency supply is a clock. Get it
-   lit, let go, and sweep the selector across to `GEN`.
+   and the emergency pump, so emergency supply is a clock.
+7. **Bring the field up once it is lit.** Until the machine is making volts
+   there is no main bus, which means no circulating pump, no oil pump, and
+   nothing for the `GEN` tap to carry. It is also what starts the cells
+   charging again. Then sweep the selector across to `GEN`.
 
 Then let the jacket come up to about 78 °C before you ask much of it.
 
@@ -226,10 +257,10 @@ outside limits while you are tied on and the system protection sheds you.
 
 Seized main bearing · thrown connecting rod · piston
 burned through by detonation · seizure from a boiled-dry jacket (including one
-caused by leaving the pumps switched out) · burst flywheel from throwing
+caused by leaving both pumps switched out) · burst flywheel from throwing
 the load off at full throttle · sheared coupling from closing out of phase ·
 pole slip from too little field · thrown off the system by the protection · a
-flat battery with an auxiliary set that will not fire at rest.
+flat battery with a machine that cannot excite itself at rest.
 
 **Throwing the breaker open at full load is the fastest way to destroy the
 engine.** There is no governor to catch it. Shut the throttle first.

@@ -54,7 +54,10 @@ class Plant(seed: Long = System.nanoTime()) {
     val engine = Engine(Random(seed xor 0x5EED))
     val gen = Generator()
     val grid = Grid(Random(seed xor 0xB055))
-    val service = Service()
+    /** The regular running gear: control supply, circulating pump, oil pump, lights. */
+    val mainBus = Service.mainBus()
+    /** The emergency line: ignition, excitation, emergency pump, emergency lights. */
+    val service = Service.emergencyLine()
     val events = PlantEvents()
 
     var rpm: Double = 0.0
@@ -162,14 +165,19 @@ class Plant(seed: Long = System.nanoTime()) {
     }
 
     /** Throw one of the emergency line switches on the board. */
-    fun toggleAux(i: Int) {
+    fun toggleAux(i: Int) = throwSwitch(service, ctl.auxClosed, i)
+
+    /** Throw one of the main bus switches on the board. */
+    fun toggleMain(i: Int) = throwSwitch(mainBus, ctl.mainClosed, i)
+
+    private fun throwSwitch(bus: Service, closed: BooleanArray, i: Int) {
         if (ended) return
-        val l = service.loads[i]
-        if (l.fuseBlown && !ctl.auxClosed[i]) {
+        val l = bus.loads[i]
+        if (l.fuseBlown && !closed[i]) {
             // Replacing a cartridge fuse takes a moment but you can do it.
             l.fuseBlown = false
         }
-        ctl.auxClosed[i] = !ctl.auxClosed[i]
+        closed[i] = !closed[i]
         events.knifeSwitch = true
     }
 
@@ -197,22 +205,33 @@ class Plant(seed: Long = System.nanoTime()) {
     private fun integrate(dt: Double) {
         val omega = rpm * PI / 30.0
 
-        // Work out the emergency line before anything else, because the ignition,
-        // the field and the cooling water pumps all hang off it.
+        // Work out the switchboard before anything else. The main bus hangs off
+        // the generator terminals through the station transformer, and the
+        // emergency line hangs off whichever source the selector is pointing at
+        // — one of which is the main bus itself.
         engine.busSupplyPu = grid.volts / Spec.RATED_VOLTS
         engine.genTerminalPu = gen.emf(rpm) / Spec.RATED_VOLTS
+        mainBus.step(dt, ctl.mainClosed, stationTransformerPu(), Service.CAPACITY_STATION_KW)
+        if (mainBus.fuseBlewThisStep) events.fuseBlew = true
+        engine.mainBusPu = mainBus.volts
+
         val strength = engine.sourceStrength(ctl, rpm)
         val capacity = when (ctl.ignition) {
             IgnitionMode.GRID -> Service.CAPACITY_GRID_KW
-            IgnitionMode.GEN -> Service.CAPACITY_GEN_KW
+            IgnitionMode.GEN -> Service.CAPACITY_MAIN_KW
             IgnitionMode.EMG -> Service.CAPACITY_BATTERY_KW
             IgnitionMode.OFF -> 0.0
         }
-        service.step(dt, ctl, strength, capacity)
+        service.step(dt, ctl.auxClosed, strength, capacity)
         if (service.fuseBlewThisStep) events.fuseBlew = true
         engine.serviceVolts = service.volts
         engine.ignitionLive = service.isRunning(Service.IGNITION)
-        engine.waterPumpRunning = service.isRunning(Service.PUMP)
+        engine.oilPumpRunning = mainBus.isRunning(Service.OIL_PUMP)
+        engine.coolantFlowPu = when {
+            mainBus.isRunning(Service.CIRC_PUMP) -> 1.0
+            service.isRunning(Service.EMG_PUMP) -> 0.42
+            else -> 0.0
+        }
         engine.serviceDrawKw = service.demandKw
 
         // ---- prime movers -------------------------------------------------------
@@ -291,6 +310,7 @@ class Plant(seed: Long = System.nanoTime()) {
         s -= engine.knockDamage * 30.0
         s -= engine.bearingWear * 30.0
         for (l in service.loads) if (l.fuseBlown) s -= 6.0
+        for (l in mainBus.loads) if (l.fuseBlown) s -= 6.0
         if (failure != Failure.SHIFT_COMPLETE && failure != Failure.NONE) s -= 40.0
         return clamp(s, 0.0, 100.0).toInt()
     }
@@ -313,11 +333,30 @@ class Plant(seed: Long = System.nanoTime()) {
         if (service.isRunning(Service.EXCITATION)) clamp(service.volts, 0.0, 1.0) else 0.0
 
     /**
-     * How brightly the panel lamps burn, which depends on whether the source the
-     * selector is pointing at is actually alive.
+     * The station transformer, tapped off the generator terminals, per unit.
+     * This is the one thing that feeds the main bus, so the regular controls and
+     * the big pumps are dead until the machine is turning and excited. Once the
+     * unit breaker is closed the machine is held up by the system and the bus
+     * comes with it.
      */
-    fun panelLampLevel(): Double =
-        if (service.isRunning(Service.LIGHTS)) clamp(service.volts, 0.0, 1.0) else 0.0
+    fun stationTransformerPu(): Double {
+        val v = genVolts / Spec.RATED_VOLTS
+        // Below about a quarter of normal volts there is nothing worth having;
+        // above that the bus comes up quickly and then holds.
+        val t = clamp((v - 0.28) / 0.30, 0.0, 1.0)
+        return t * t * (3 - 2 * t) * 1.02
+    }
+
+    /**
+     * How brightly the room and the panel lamps burn. The house lighting is on
+     * the main bus; when that is dead the emergency lamps give you just enough
+     * to read the board by.
+     */
+    fun panelLampLevel(): Double = when {
+        mainBus.isRunning(Service.LIGHTS) -> clamp(mainBus.volts, 0.0, 1.0)
+        service.isRunning(Service.EMG_LIGHTS) -> clamp(service.volts, 0.0, 1.0) * 0.45
+        else -> 0.0
+    }
 
     /** Plant clock: the shift starts at six in the evening. */
     fun clockText(): String {
@@ -337,7 +376,7 @@ class Plant(seed: Long = System.nanoTime()) {
         rpm = 0.0; syncPhase = 0.0; couplingDamage = 0.0
         failure = Failure.NONE; shiftSeconds = 0.0; peakOutputKw = 0.0; overspeedSeconds = 0.0
         wasBreakerClosed = false; previousDemandStep = 0
-        engine.reset(); gen.reset(); grid.reset(); service.reset()
+        engine.reset(); gen.reset(); grid.reset(); service.reset(); mainBus.reset()
         gridTripSeconds = 0.0
         ctl.ignition = IgnitionMode.OFF
         ctl.throttle = 0.45; ctl.sparkLever = 0.30; ctl.mixture = 0.80; ctl.excitation = 0.0
@@ -347,5 +386,6 @@ class Plant(seed: Long = System.nanoTime()) {
         ctl.emgTxBreakerClosed = true; ctl.batteryBreakerClosed = true
         ctl.auxClosed[0] = true; ctl.auxClosed[1] = true
         ctl.auxClosed[2] = true; ctl.auxClosed[3] = false
+        for (i in ctl.mainClosed.indices) ctl.mainClosed[i] = true
     }
 }

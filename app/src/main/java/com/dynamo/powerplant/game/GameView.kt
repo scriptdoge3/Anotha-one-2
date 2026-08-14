@@ -211,6 +211,9 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
         if (l.batteryBreaker.contains(x, y)) {
             p.ctl.batteryBreakerClosed = !p.ctl.batteryBreakerClosed; audio.clunk(); return
         }
+        for (i in l.mainSwitches.indices) {
+            if (l.mainSwitches[i].contains(x, y)) { p.toggleMain(i); audio.clunk(); return }
+        }
         for (i in l.auxSwitches.indices) {
             if (l.auxSwitches[i].contains(x, y)) { p.toggleAux(i); audio.clunk(); return }
         }

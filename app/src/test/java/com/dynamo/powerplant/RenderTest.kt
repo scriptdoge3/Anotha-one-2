@@ -107,6 +107,7 @@ class RenderTest {
         p.ctl.ignition = IgnitionMode.EMG; p.engine.starterEngaged = true
         run(p, 3.5); p.ctl.compressionRelease = false; run(p, 5.0)
         p.engine.starterEngaged = false
+        p.ctl.excitation = 0.60          // the main bus hangs off the station transformer
         run(p, 50.0) { trim(it); hold(it, 60.0, 1.0 / 60.0) }
         sweepTo(p, IgnitionMode.GEN)
         run(p, 20.0) {
@@ -129,6 +130,7 @@ class RenderTest {
         p.ctl.ignition = IgnitionMode.EMG; p.engine.starterEngaged = true
         run(p, 3.5); p.ctl.compressionRelease = false; run(p, 5.0)
         p.engine.starterEngaged = false
+        p.ctl.excitation = 0.60          // the main bus hangs off the station transformer
         run(p, 50.0) { trim(it); hold(it, 60.0, 1.0 / 60.0) }
         sweepTo(p, IgnitionMode.GEN)
         run(p, 50.0) {
@@ -169,6 +171,7 @@ class RenderTest {
         p.ctl.ignition = IgnitionMode.EMG; p.engine.starterEngaged = true
         run(p, 3.5); p.ctl.compressionRelease = false; run(p, 5.0)
         p.engine.starterEngaged = false
+        p.ctl.excitation = 0.60          // the main bus hangs off the station transformer
         run(p, 50.0) { trim(it); hold(it, 60.0, 1.0 / 60.0) }
         // walk away from the water gate
         p.ctl.throttle = 0.9
