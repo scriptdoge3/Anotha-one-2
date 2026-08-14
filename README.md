@@ -78,29 +78,33 @@ bright with current beads sliding along them; dead ones go grey; open contacts
 show as a blade swung clear of its jaws.
 
 ```
-  ================= GRID 2300 V =========================
-        |                                            |
-   UNIT BREAKER                                 STARTING TX
-        |                                            |
-     MAIN TX                                         |
-        |                                            |
-  ======+========= GENERATOR TERMINALS ==========     |
-        |        |                    |              |
-     [ GEN ]  STATION TX         EMG TX BREAKER       |
-                 |                    |              |
-  ===== MAIN BUS =====            EMERGENCY TX        |
-    |    |    |    |                  |              |
-  CTRL CIRC  OIL LIGHT                +--- BATTERY   |
-   1.2 14.0  5.5  3.0                 |       |      |
-                                    (GEN)  BATT BKR  |
-                                      |       |      |
-                                      |     (EMG)  (GRID)
-                                      |       |      |
-  ================= EMERGENCY LINE ====+=======+======+==
+  == UNIT H.T. ==+== UNIT BREAKER ==+========= GRID 2300 V =====
+        |                                              |
+     MAIN TX                                     STARTING TX
+        |                                              |
+  ======+========= GENERATOR TERMINALS ==========       |
+        |        |                    |                |
+     [ GEN ]  STATION TX         EMG TX BREAKER         |
+                 |                    |                |
+  ===== MAIN BUS =====            EMERGENCY TX          |
+    |    |    |    |                  |                |
+  CTRL CIRC  OIL LIGHT                +--- BATTERY      |
+   1.2 14.0  5.5  3.0                 |        |        |
+                                    (GEN)   BATT BKR    |
+                                      |        |        |
+                                      |      (EMG)   (GRID)
+                                      |        |        |
+  ================= EMERGENCY LINE ====+========+========+==
     |      |       |       |
    IGN    EXC   E.PUMP   E.LT
    0.6    2.2     4.0     1.2
 ```
+
+The high tension bar is sectionalised at the unit breaker. The short left
+section is the machine's own — the main transformer up from the generator
+terminals, and nothing else on it. Everything right of the breaker is the
+system, and that is what the starting transformer hangs on, which is why `GRID`
+supply survives having the unit breaker open.
 
 The mimic is coloured the way a real control room panel is: **red** for the
 high tension side, **orange** for generator voltage and the main bus, **green**

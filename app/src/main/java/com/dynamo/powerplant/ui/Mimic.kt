@@ -32,10 +32,10 @@ object Mimic {
     // it the plant's two internal buses: the main bus on the left carrying the
     // regular gear, the emergency circuit running out to the right and back
     // down onto its own line.
-    private const val BUS_Y = 0.070f
+    private const val BUS_Y = 0.090f
     private const val UNIT_X = 0.090f
-    private const val UNIT_BKR_Y = 0.170f
-    private const val MAIN_TX_Y = 0.265f
+    private const val UNIT_BKR_X = 0.265f
+    private const val MAIN_TX_Y = 0.225f
     private const val GEN_BUS_Y = 0.360f
     private const val GEN_Y = 0.470f
 
@@ -85,21 +85,29 @@ object Mimic {
             u * 0.92f, Theme.dim(Theme.MARK_SOFT, ambient)
         )
 
-        // ================= high tension: the grid and the unit =================
+        // ================= high tension ========================================
+        // The bar is sectionalised at the unit breaker. The short left section is
+        // the machine's own: main transformer up from the generator terminals,
+        // and nothing else on it. Everything to the right of the breaker is the
+        // system, and that is what the starting transformer hangs on.
+        val ubx = x(UNIT_BKR_X)
         val hv = level(Theme.HV_LIVE, Theme.HV_DEAD, gridLive, ambient)
-        bar(c, x(0.040f), x(0.972f), y(BUS_Y), u * 0.95f, hv, gridLive, phase, 0.5f, ambient)
-        Theme.miniPlate(c, x(0.360f), y(BUS_Y) - u * 1.6f, "GRID  2300 V", u * 0.62f, ambient)
-
-        val ux = x(UNIT_X)
-        // grid bus down to the unit breaker, and on into the main transformer
-        run(c, ux, y(BUS_Y), ux, y(UNIT_BKR_Y) - u * 1.0f, u * 0.62f, hv, gridLive, phase, 0.4f, ambient)
-        device(c, ux, y(UNIT_BKR_Y), u, tied, hv, ambient)
-        Theme.miniPlate(c, ux + u * 4.4f, y(UNIT_BKR_Y), "UNIT BREAKER", u * 0.58f, ambient)
-
         val hvOut = level(Theme.HV_LIVE, Theme.HV_DEAD, txOutLive, ambient)
-        run(c, ux, y(UNIT_BKR_Y) + u * 1.0f, ux, y(MAIN_TX_Y) - u * 1.3f, u * 0.62f, hvOut, txOutLive, phase, 0.4f, ambient)
+
+        bar(c, x(0.040f), ubx - u * 0.95f, y(BUS_Y), u * 0.95f, hvOut, txOutLive, phase, 0.5f, ambient)
+        Theme.miniPlate(c, x(0.150f), y(BUS_Y) - u * 1.7f, "UNIT H.T.", u * 0.60f, ambient)
+
+        deviceH(c, ubx, y(BUS_Y), u, tied, hv, ambient, lampAbove = false)
+        Theme.miniPlate(c, ubx + u * 4.7f, y(BUS_Y) + u * 2.4f, "UNIT BREAKER", u * 0.58f, ambient)
+
+        bar(c, ubx + u * 0.95f, x(0.972f), y(BUS_Y), u * 0.95f, hv, gridLive, phase, 0.5f, ambient)
+        Theme.miniPlate(c, x(0.780f), y(BUS_Y) - u * 1.7f, "GRID  2300 V", u * 0.62f, ambient)
+
+        // the machine's section down through the main transformer
+        val ux = x(UNIT_X)
+        run(c, ux, y(BUS_Y), ux, y(MAIN_TX_Y) - u * 1.3f, u * 0.62f, hvOut, txOutLive, phase, 0.4f, ambient)
         transformer(c, ux, y(MAIN_TX_Y), u * 1.3f, hvOut, ambient)
-        Theme.miniPlate(c, ux + u * 4.9f, y(MAIN_TX_Y), "MAIN TRANSFORMER", u * 0.58f, ambient)
+        Theme.miniPlate(c, ux + u * 5.0f, y(MAIN_TX_Y), "MAIN TRANSFORMER", u * 0.58f, ambient)
 
         // ================= generator terminals =================================
         // Everything the plant runs on comes off this bar, one way or another.
@@ -285,7 +293,10 @@ object Mimic {
     }
 
     /** The same device, lying in a horizontal run instead of a vertical one. */
-    private fun deviceH(c: Canvas, cx: Float, cy: Float, u: Float, closed: Boolean, color: Int, ambient: Float) {
+    private fun deviceH(
+        c: Canvas, cx: Float, cy: Float, u: Float, closed: Boolean, color: Int, ambient: Float,
+        lampAbove: Boolean = true
+    ) {
         val w = u * 0.95f
         val h = u * 0.72f
         val box = RectF(cx - w, cy - h, cx + w, cy + h)
@@ -296,9 +307,9 @@ object Mimic {
         } else {
             c.drawLine(box.left, cy, box.right, cy - h * 0.72f, Theme.line(color, u * 0.34f))
         }
-        // above the box, clear of whatever the run does on its way down
+        // clear of whatever the run does on its way past
         Theme.lamp(
-            c, cx, cy - u * 1.95f, u * 0.52f,
+            c, cx, cy + (if (lampAbove) -u * 1.95f else u * 1.60f), u * 0.52f,
             if (closed) Theme.LAMP_GREEN else Theme.LAMP_RED, if (closed) 0.95f else 0.85f
         )
     }
